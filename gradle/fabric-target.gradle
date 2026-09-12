@@ -1,0 +1,115 @@
+def targetProperties = new Properties()
+def versionFile = rootProject.file("gradle/versions/fabric-${project.projectDir.name}.properties")
+if (!versionFile.isFile()) {
+	throw new GradleException("Missing Fabric target properties: ${versionFile}")
+}
+versionFile.withInputStream {
+	targetProperties.load(it)
+}
+
+def targetValue = { String key ->
+	def value = targetProperties.getProperty(key)
+	if (value == null) {
+		throw new GradleException("Missing target property '${key}' in ${versionFile}")
+	}
+	return value
+}
+
+def minecraftVersion = targetValue('minecraft_version')
+def yarnMappings = targetValue('yarn_mappings')
+def loaderVersion = targetValue('loader_version')
+def fabricVersion = targetValue('fabric_version')
+def fabricKotlinVersion = targetValue('fabric_kotlin_version')
+def yaclVersion = targetValue('yacl_version')
+def yaclMinVersion = targetValue('yacl_min_version')
+def modMenuVersion = targetValue('modmenu_version')
+def javaVersion = Integer.parseInt(targetValue('java_version'))
+
+version = "${rootProject.mod_version}+mc${minecraftVersion}"
+group = rootProject.maven_group
+
+base {
+	archivesName = "${rootProject.archives_base_name}-fabric-${minecraftVersion}"
+}
+
+repositories {
+	mavenCentral()
+	maven { url = 'https://maven.terraformersmc.com/releases/' }
+	maven { url = 'https://maven.isxander.dev/releases/' }
+	maven { url = 'https://maven.nucleoid.xyz/' }
+}
+
+fabricApi {
+	configureDataGeneration {
+		client = true
+	}
+}
+
+dependencies {
+	minecraft "com.mojang:minecraft:${minecraftVersion}"
+	mappings "net.fabricmc:yarn:${yarnMappings}:v2"
+	modImplementation "net.fabricmc:fabric-loader:${loaderVersion}"
+	modImplementation "net.fabricmc.fabric-api:fabric-api:${fabricVersion}"
+	modImplementation "net.fabricmc:fabric-language-kotlin:${fabricKotlinVersion}"
+	modImplementation "dev.isxander:yet-another-config-lib:${yaclVersion}"
+	modCompileOnly "com.terraformersmc:modmenu:${modMenuVersion}"
+	modLocalRuntime "com.terraformersmc:modmenu:${modMenuVersion}"
+
+	implementation project(':common')
+	include project(':common')
+}
+
+processResources {
+	from(rootProject.file('common/src/main/resources'))
+
+	inputs.property 'version', project.version
+	inputs.property 'minecraft_version', minecraftVersion
+	inputs.property 'loader_version', loaderVersion
+	inputs.property 'java_version', javaVersion
+	inputs.property 'yacl_version', yaclVersion
+	inputs.property 'yacl_min_version', yaclMinVersion
+
+	filesMatching('fabric.mod.json') {
+		expand(
+			version: project.version,
+			minecraft_version: minecraftVersion,
+			loader_version: loaderVersion,
+			java_version: javaVersion,
+			yacl_version: yaclMinVersion
+		)
+	}
+}
+
+tasks.withType(JavaCompile).configureEach {
+	options.release = javaVersion
+}
+
+tasks.named('compileKotlin') {
+	kotlinOptions {
+		jvmTarget = javaVersion.toString()
+	}
+}
+
+java {
+	withSourcesJar()
+	toolchain.languageVersion = JavaLanguageVersion.of(javaVersion)
+	sourceCompatibility = JavaVersion.toVersion(javaVersion)
+	targetCompatibility = JavaVersion.toVersion(javaVersion)
+}
+
+jar {
+	inputs.property 'archivesName', project.base.archivesName
+
+	from(rootProject.file('LICENSE')) {
+		rename { "${it}_${inputs.properties.archivesName}" }
+	}
+}
+
+publishing {
+	publications {
+		create('mavenJava', MavenPublication) {
+			artifactId = project.base.archivesName.get()
+			from components.java
+		}
+	}
+}

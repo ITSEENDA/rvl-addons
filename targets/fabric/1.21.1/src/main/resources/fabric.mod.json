@@ -1,0 +1,58 @@
+{
+	"schemaVersion": 1,
+	"id": "rvl-addons",
+	"version": "${version}",
+	"name": "rvl-addons",
+	"description": "This is an example description! Tell everyone what your mod is about!",
+	"authors": [
+		"Me!"
+	],
+	"contact": {
+		"homepage": "https://fabricmc.net/",
+		"sources": "https://github.com/FabricMC/fabric-example-mod"
+	},
+	"license": "CC0-1.0",
+	"icon": "assets/rvl-addons/icon.png",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			{
+				"value": "net.eenda.rvladdons.RvlAddons",
+				"adapter": "kotlin"
+			}
+		],
+		"client": [
+			{
+				"value": "net.eenda.rvladdons.RvlAddonsClient",
+				"adapter": "kotlin"
+			}
+		],
+		"modmenu": [
+			{
+				"value": "net.eenda.rvladdons.integration.modmenu.RvlAddonsModMenu",
+				"adapter": "kotlin"
+			}
+		],
+		"fabric-datagen": [
+			{
+				"value": "net.eenda.rvladdons.RvlAddonsDataGenerator",
+				"adapter": "kotlin"
+			}
+		]
+	},
+	"mixins": [
+		"rvl-addons.mixins.json"
+	],
+	"depends": {
+		"fabricloader": ">=${loader_version}",
+		"minecraft": "~${minecraft_version}",
+		"java": ">=${java_version}",
+		"fabric-api": "*",
+		"fabric-language-kotlin": "*",
+		"yet_another_config_lib_v3": ">=${yacl_version}"
+	},
+	"suggests": {
+		"another-mod": "*",
+		"modmenu": "*"
+	}
+}

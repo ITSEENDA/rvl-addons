@@ -1,0 +1,7 @@
+{
+  "key.rvl-addons.toggle_trace": "Toggle RVL Addons trace",
+  "key.rvl-addons.toggle_mod": "Enable/disable RVL Addons",
+  "key.rvl-addons.open_settings": "Open RVL Addons settings",
+  "key.rvl-addons.swap_coma_set": "Swap to next COMA set",
+  "category.rvl-addons": "RVL Addons"
+}

@@ -1,0 +1,7 @@
+plugins {
+	id 'fabric-loom'
+	id 'maven-publish'
+	id 'org.jetbrains.kotlin.jvm'
+}
+
+apply from: rootProject.file('gradle/fabric-target.gradle')
