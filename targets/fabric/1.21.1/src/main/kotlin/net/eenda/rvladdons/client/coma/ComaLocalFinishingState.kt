@@ -3,6 +3,8 @@ package net.eenda.rvladdons.client.coma
 import net.eenda.rvladdons.core.RvlAddonsConfigStore
 import net.eenda.rvladdons.core.RvlAddonsTrace
 import net.minecraft.client.MinecraftClient
+import net.minecraft.client.gui.screen.ingame.HandledScreen
+import net.minecraft.item.ItemStack
 
 internal class ComaLocalFinishingState(owner: ComaSwapController) : ComaSwapState(owner) {
     internal var completed = false
@@ -37,6 +39,16 @@ internal class ComaLocalFinishingState(owner: ComaSwapController) : ComaSwapStat
     }
 
     private fun complete(client: MinecraftClient, current: SwapRequest) {
+        if (!current.requiresServerSync) {
+            val screen = client.currentScreen as? HandledScreen<*>
+            val handler = screen?.let(owner::screenHandler)
+            if (handler != null && owner.isComaScreen(screen)) {
+                owner.confirmLocalSet(
+                    current.setIndex,
+                    owner.comaSlots.map { handler.getSlot(it).stack.takeUnless(ItemStack::isEmpty)?.copy() }
+                )
+            }
+        }
         owner.pendingHudSetIndex = current.setIndex
         owner.pendingHudSyncId = current.syncId
         owner.pendingHudRules = current.expectedRules.toList()

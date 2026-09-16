@@ -4,6 +4,7 @@ import net.eenda.rvladdons.core.GameplayServerState
 import net.eenda.rvladdons.core.ModEnabledState
 import net.eenda.rvladdons.core.RvlAddonsConfigStore
 import net.eenda.rvladdons.core.RvlAddonsTrace
+import net.eenda.rvladdons.feature.coma.ComaStateStore
 import net.eenda.rvladdons.client.coma.ComaSwapController
 import net.eenda.rvladdons.client.config.RvlAddonsConfigScreen
 import net.eenda.rvladdons.client.hud.RvlAddonsHudRenderer
@@ -30,6 +31,7 @@ object RvlAddonsClient : ClientModInitializer {
 
     override fun onInitializeClient() {
         RvlAddonsConfigStore.load(FabricLoader.getInstance().configDir.resolve("rvl-addons.properties"))
+        ComaStateStore.load(FabricLoader.getInstance().configDir.resolve("rvl-addons-coma-state.properties"))
         ModEnabledState.set(RvlAddonsConfigStore.config.enabled)
         RvlAddonsHudRenderer.register()
 
@@ -74,11 +76,13 @@ object RvlAddonsClient : ClientModInitializer {
             RvlAddonsTrace.log("command-out", command)
         }
 
-        ClientPlayConnectionEvents.JOIN.register { _, _, _ ->
+        ClientPlayConnectionEvents.JOIN.register { _, _, client ->
             ComaSwapController.reset()
+            ComaSwapController.restorePersistedState(client)
         }
 
-        ClientPlayConnectionEvents.DISCONNECT.register { _, _ ->
+        ClientPlayConnectionEvents.DISCONNECT.register { _, client ->
+            ComaSwapController.persistCurrentState(client)
             ComaSwapController.reset()
             updateRvlServerState(false)
         }

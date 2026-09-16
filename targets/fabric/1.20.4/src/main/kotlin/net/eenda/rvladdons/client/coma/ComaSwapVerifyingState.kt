@@ -74,6 +74,7 @@ internal class ComaSwapVerifyingState(owner: ComaSwapController) : ComaSwapState
             else (serverSync?.contents?.getOrNull(owner.comaSlots[index])
                 ?: handler.getSlot(owner.comaSlots[index]).stack).copy()
         }
+        owner.rememberConfirmedSet(current.setIndex)
         owner.clearPendingHud()
         val set = RvlAddonsConfigStore.config.comaSets.getOrNull(current.setIndex)
         owner.notify(client, "RVL COMA: equipped ${set?.let(owner::displayName) ?: "Set ${current.setIndex + 1}"}")

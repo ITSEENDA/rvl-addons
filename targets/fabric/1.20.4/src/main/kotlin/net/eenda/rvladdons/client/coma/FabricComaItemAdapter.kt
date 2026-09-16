@@ -6,9 +6,15 @@ import net.eenda.rvladdons.feature.coma.ComaItemRuleMatcher
 import net.eenda.rvladdons.feature.coma.ComaItemSnapshot
 import net.eenda.rvladdons.feature.coma.RegisteredComaItemRule
 import net.minecraft.item.ArmorItem
+import net.minecraft.item.AxeItem
+import net.minecraft.item.BowItem
+import net.minecraft.item.CrossbowItem
 import net.minecraft.item.ItemStack
+import net.minecraft.item.SwordItem
+import net.minecraft.item.TridentItem
 import net.minecraft.nbt.NbtElement
 import net.minecraft.registry.Registries
+import net.minecraft.util.Identifier
 import net.minecraft.text.Text
 
 /** Fabric 1.20.4 item identity and NBT extraction. */
@@ -19,6 +25,12 @@ object FabricComaItemAdapter {
         armorType = (stack.item as? ArmorItem)?.type?.toString().orEmpty(),
         fingerprint = itemFingerprint(stack)
     )
+
+    fun iconStack(itemId: String): ItemStack? {
+        val identifier = Identifier.tryParse(itemId) ?: return null
+        val item = Registries.ITEM.getOrEmpty(identifier).orElse(null) ?: return null
+        return ItemStack(item)
+    }
 
     fun encodeRule(stack: ItemStack): String {
         val itemId = Registries.ITEM.getId(stack.item).toString()
@@ -36,14 +48,13 @@ object FabricComaItemAdapter {
     }
 
     fun extractSetName(stack: ItemStack): String? {
-        val lines = itemLore(stack)
+        val lines = loreLines(stack)
         val activation = lines.firstOrNull { RvlTextMatcher.normalize(it).contains("KICH HOAT BO") }
         if (activation != null) {
-            val marker = activation.indexOf("bộ", ignoreCase = true)
-            if (marker >= 0) {
-                activation.substring(marker + 2).trim().trim('[', ']')
-                    .takeIf(String::isNotBlank)?.let { return it }
-            }
+            val normalized = RvlTextMatcher.normalize(activation)
+            val marker = normalized.indexOf("KICH HOAT BO")
+            normalized.substring(marker + "KICH HOAT BO".length).trim().trim('[', ']')
+                .takeIf(String::isNotBlank)?.let { return it }
         }
         val armorSet = lines.firstOrNull {
             val normalized = RvlTextMatcher.normalize(it)
@@ -111,7 +122,13 @@ object FabricComaItemAdapter {
     fun matches(stack: ItemStack, rule: String): Boolean =
         ComaItemRuleMatcher.matches(stack.takeUnless(ItemStack::isEmpty)?.let(::snapshot), rule)
 
-    private fun itemLore(stack: ItemStack): List<String> {
+    fun isWeapon(stack: ItemStack): Boolean =
+        stack.item is SwordItem || stack.item is AxeItem || stack.item is BowItem ||
+            stack.item is CrossbowItem || stack.item is TridentItem
+
+    fun isArmor(stack: ItemStack): Boolean = stack.item is ArmorItem
+
+    fun loreLines(stack: ItemStack): List<String> {
         val display = stack.nbt?.getCompound("display") ?: return emptyList()
         val lore = display.getList("Lore", NbtElement.STRING_TYPE.toInt())
         return (0 until lore.size).mapNotNull { index ->

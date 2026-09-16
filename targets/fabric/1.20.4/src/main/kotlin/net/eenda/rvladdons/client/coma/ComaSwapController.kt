@@ -11,6 +11,7 @@ import net.eenda.rvladdons.feature.coma.ComaItemRuleCodec
 import net.eenda.rvladdons.feature.coma.ComaInventorySnapshot
 import net.eenda.rvladdons.feature.coma.ComaRole
 import net.eenda.rvladdons.feature.coma.ComaSetConfig
+import net.eenda.rvladdons.feature.coma.ComaStateStore
 import net.eenda.rvladdons.mixins.ScreenTraceAccessor
 import net.minecraft.client.MinecraftClient
 import net.minecraft.client.gui.screen.Screen
@@ -60,6 +61,9 @@ object ComaSwapController {
     internal val swapVerifyingState = ComaSwapVerifyingState(this)
     private var activeCapture: CaptureRequest? = null
     private var activeSwap: SwapRequest? = null
+    private var restorePending = false
+    private var restoreSetIndex = -1
+    private var restoreDeadline = 0L
     internal var abortReason: String? = null
     internal val captureOperation: CaptureRequest?
         get() = activeCapture
@@ -244,6 +248,7 @@ object ComaSwapController {
             val message = pendingNotifications.poll() ?: break
             notify(client, message)
         }
+        if (restorePending) tryRestorePersistedState(client)
         stateMachine.update()
     }
 
@@ -256,7 +261,54 @@ object ComaSwapController {
         serverSyncs.clear()
         confirmedSetIndex = -1
         currentComaStacks = List(4) { null }
+        restorePending = false
+        restoreSetIndex = -1
+        restoreDeadline = 0L
         clearPendingHud()
+    }
+
+    fun persistCurrentState(client: MinecraftClient) {
+        val set = RvlAddonsConfigStore.config.comaSets.getOrNull(confirmedSetIndex) ?: return
+        ComaStateStore.save(serverKey(client), set.rules(), iconItemIds())
+        RvlAddonsTrace.log("coma", "persisted confirmed setIndex=$confirmedSetIndex")
+    }
+
+    fun restorePersistedState(client: MinecraftClient) {
+        restorePending = false
+        restoreSetIndex = -1
+        restoreDeadline = 0L
+        val persisted = ComaStateStore.current()
+        if (persisted.rules.isEmpty()) return
+        val currentServer = serverKey(client)
+        if (persisted.serverKey.isNotBlank() && currentServer.isNotBlank() &&
+            !persisted.serverKey.equals(currentServer, ignoreCase = true)
+        ) {
+            RvlAddonsTrace.log("coma", "persist-skip server-mismatch saved=${persisted.serverKey} current=$currentServer")
+            return
+        }
+        val setIndex = RvlAddonsConfigStore.config.comaSets.indexOfFirst { it.rules() == persisted.rules }
+        if (setIndex < 0) {
+            RvlAddonsTrace.log("coma", "persist-skip configured-set-not-found")
+            return
+        }
+        restorePending = true
+        restoreSetIndex = setIndex
+        restoreDeadline = System.currentTimeMillis() + 5_000L
+        tryRestorePersistedState(client)
+    }
+
+    internal fun rememberConfirmedSet(setIndex: Int) {
+        val set = RvlAddonsConfigStore.config.comaSets.getOrNull(setIndex) ?: return
+        val client = MinecraftClient.getInstance()
+        ComaStateStore.save(serverKey(client), set.rules(), iconItemIds())
+        RvlAddonsTrace.log("coma", "persist confirmed setIndex=$setIndex")
+    }
+
+    internal fun confirmLocalSet(setIndex: Int, stacks: List<ItemStack?>) {
+        currentComaStacks = stacks.map { it?.copy() }
+        confirmedSetIndex = setIndex
+        selectedSetIndex = setIndex
+        rememberConfirmedSet(setIndex)
     }
 
     fun onSetReordered(from: Int, to: Int) {
@@ -368,6 +420,7 @@ object ComaSwapController {
         }
         confirmedSetIndex = pendingHudSetIndex
         selectedSetIndex = pendingHudSetIndex
+        rememberConfirmedSet(pendingHudSetIndex)
         RvlAddonsTrace.log("coma", "hud-server-confirmed syncId=$syncId setIndex=$pendingHudSetIndex")
         clearPendingHud()
     }
@@ -420,6 +473,46 @@ object ComaSwapController {
 
     internal fun notify(client: MinecraftClient, message: String) {
         RvlToastManager.show(message)
+    }
+
+    private fun tryRestorePersistedState(client: MinecraftClient) {
+        if (!RvlAddonsClient.isGameplayServerActive()) return
+        if (System.currentTimeMillis() > restoreDeadline) {
+            restorePending = false
+            RvlAddonsTrace.log("coma", "persist-restore-timeout setIndex=$restoreSetIndex")
+            return
+        }
+        val set = RvlAddonsConfigStore.config.comaSets.getOrNull(restoreSetIndex) ?: run {
+            restorePending = false
+            return
+        }
+        val stacks = inventoryStacks(client, restoreSetIndex)
+        val inventoryMatches = set.rules().withIndex().all { (index, rule) ->
+            rule.isBlank() || stacks.getOrNull(index)?.let { FabricComaItemAdapter.matches(it, rule) } == true
+        }
+        currentComaStacks = if (inventoryMatches) stacks else {
+            val persisted = ComaStateStore.current()
+            val iconIds = persisted.iconItemIds.ifEmpty {
+                persisted.rules.map { ComaItemRuleCodec.decode(it)?.itemId.orEmpty() }
+            }
+            iconIds.map { FabricComaItemAdapter.iconStack(it) }
+                .let { ids -> ids + List(4 - ids.size) { null } }
+                .take(4)
+        }
+        confirmedSetIndex = restoreSetIndex
+        selectedSetIndex = restoreSetIndex
+        restorePending = false
+        RvlAddonsTrace.log(
+            "coma",
+            "persist-restored setIndex=$restoreSetIndex inventoryMatched=$inventoryMatches"
+        )
+    }
+
+    private fun serverKey(client: MinecraftClient): String =
+        client.currentServerEntry?.address?.trim()?.lowercase().orEmpty()
+
+    private fun iconItemIds(): List<String> = currentComaStacks.map { stack ->
+        stack?.takeUnless(ItemStack::isEmpty)?.let { FabricComaItemAdapter.snapshot(it).itemId }.orEmpty()
     }
 
 }
