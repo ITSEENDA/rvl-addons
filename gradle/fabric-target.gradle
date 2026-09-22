@@ -41,6 +41,8 @@ repositories {
 	maven { url = 'https://maven.nucleoid.xyz/' }
 }
 
+sourceSets.main.kotlin.srcDir(rootProject.file('targets/fabric/shared/src/main/kotlin'))
+
 fabricApi {
 	configureDataGeneration {
 		client = true
