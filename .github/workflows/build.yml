@@ -12,6 +12,12 @@ jobs:
     steps:
       - name: checkout repository
         uses: actions/checkout@v4
+      - name: checkout Tako Libs
+        uses: actions/checkout@v4
+        with:
+          repository: ITSEENDA/tako-libs
+          ref: main
+          path: tako-libs
       - name: validate gradle wrapper
         uses: gradle/actions/wrapper-validation@v4
       - name: setup jdk
@@ -20,7 +26,10 @@ jobs:
           java-version: '21'
           distribution: 'microsoft'
       - name: make gradle wrapper executable
-        run: chmod +x ./gradlew
+        run: chmod +x ./gradlew ./tako-libs/gradlew
+      - name: publish Tako Libs to Maven local
+        working-directory: tako-libs
+        run: ./gradlew publishToMavenLocal
       - name: build
         run: ./gradlew build
       - name: capture build artifacts
