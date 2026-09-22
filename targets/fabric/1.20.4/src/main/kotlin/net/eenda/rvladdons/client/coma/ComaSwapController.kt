@@ -1,7 +1,7 @@
 package net.eenda.rvladdons.client.coma
 
 import net.eenda.rvladdons.RvlAddonsClient
-import net.eenda.rvladdons.client.ui.RvlToastManager
+import dev.tako.libs.client.ui.feedback.TakoToastManager
 import net.eenda.rvladdons.core.RvlAddonsConfigStore
 import net.eenda.rvladdons.core.RvlAddonsTrace
 import net.eenda.rvladdons.core.RvlTextMatcher
@@ -472,7 +472,7 @@ object ComaSwapController {
     }
 
     internal fun notify(client: MinecraftClient, message: String) {
-        RvlToastManager.show(message)
+        TakoToastManager.show(message)
     }
 
     private fun tryRestorePersistedState(client: MinecraftClient) {
