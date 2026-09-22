@@ -43,12 +43,6 @@ repositories {
 
 sourceSets.main.kotlin.srcDir(rootProject.file('targets/fabric/shared/src/main/kotlin'))
 
-fabricApi {
-	configureDataGeneration {
-		client = true
-	}
-}
-
 dependencies {
 	minecraft "com.mojang:minecraft:${minecraftVersion}"
 	mappings "net.fabricmc:yarn:${yarnMappings}:v2"

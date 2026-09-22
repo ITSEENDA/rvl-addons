@@ -32,12 +32,6 @@
 				"value": "net.eenda.rvladdons.integration.modmenu.RvlAddonsModMenu",
 				"adapter": "kotlin"
 			}
-		],
-		"fabric-datagen": [
-			{
-				"value": "net.eenda.rvladdons.RvlAddonsDataGenerator",
-				"adapter": "kotlin"
-			}
 		]
 	},
 	"mixins": [
