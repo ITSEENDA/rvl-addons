@@ -13,3 +13,4 @@ object RvlAddons : ModInitializer {
 		logger.info("Hello Fabric world!")
 	}
 }
+

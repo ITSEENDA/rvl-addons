@@ -123,7 +123,7 @@ object RvlAddonsConfigScreen {
             )
             .option(
                 Option.createBuilder<Boolean>()
-                    .name(Text.literal("Verify swap with server"))
+                    .name(Text.literal("Sync with server"))
                     .description(OptionDescription.of(Text.literal("Wait for server container updates and verify every COMA swap. Disable for local burst swapping.")))
                     .binding(config.comaSwapServerSync, { config.comaSwapServerSync }, { config.comaSwapServerSync = it })
                     .controller { BooleanControllerBuilder.create(it).coloured(true).onOffFormatter() }
@@ -226,3 +226,4 @@ object RvlAddonsConfigScreen {
             .generateScreen(parent)
     }
 }
+

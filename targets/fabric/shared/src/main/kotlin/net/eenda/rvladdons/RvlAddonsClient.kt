@@ -168,3 +168,4 @@ object RvlAddonsClient : ClientModInitializer {
     }
 
 }
+
