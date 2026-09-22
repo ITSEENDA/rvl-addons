@@ -12,6 +12,7 @@ data class RvlAddonsConfig(
     var hudStatus: HudLayout = HudLayout(),
     var hudTraceVisible: Boolean = true,
     var hudTrace: HudLayout = HudLayout(offsetY = 26),
+    var hudCooldownVisible: Boolean = true,
     var hudCooldown: HudLayout = HudLayout(offsetY = 46),
     var hudComaVisible: Boolean = true,
     var hudComa: HudLayout = HudLayout(offsetY = 70),
@@ -65,6 +66,7 @@ object RvlAddonsConfigStore {
                 offsetY = properties.getProperty("hud.trace.offsetY")?.toIntOrNull() ?: 26,
                 scale = properties.getProperty("hud.trace.scale")?.toFloatOrNull()?.coerceIn(0.5f, 2f) ?: 1f
             ),
+            hudCooldownVisible = properties.getProperty("hud.cooldown.visible")?.toBooleanStrictOrNull() ?: true,
             hudCooldown = HudLayout(
                 anchor = properties.getProperty("hud.cooldown.anchor")?.let {
                     runCatching { HudAnchor.valueOf(it) }.getOrNull()
@@ -110,6 +112,7 @@ object RvlAddonsConfigStore {
         properties["hud.trace.offsetX"] = config.hudTrace.offsetX.toString()
         properties["hud.trace.offsetY"] = config.hudTrace.offsetY.toString()
         properties["hud.trace.scale"] = config.hudTrace.scale.toString()
+        properties["hud.cooldown.visible"] = config.hudCooldownVisible.toString()
         properties["hud.cooldown.anchor"] = config.hudCooldown.anchor.name
         properties["hud.cooldown.offsetX"] = config.hudCooldown.offsetX.toString()
         properties["hud.cooldown.offsetY"] = config.hudCooldown.offsetY.toString()

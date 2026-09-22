@@ -5,8 +5,10 @@ import net.eenda.rvladdons.core.ModEnabledState
 import net.eenda.rvladdons.core.RvlAddonsConfigStore
 import net.eenda.rvladdons.core.RvlAddonsTrace
 import net.eenda.rvladdons.feature.coma.ComaStateStore
+import net.eenda.rvladdons.feature.cooldown.SkillProfileStore
 import net.eenda.rvladdons.client.coma.ComaSwapController
 import net.eenda.rvladdons.client.config.RvlAddonsConfigScreen
+import net.eenda.rvladdons.client.cooldown.CooldownController
 import net.eenda.rvladdons.client.hud.RvlAddonsHudRenderer
 import net.fabricmc.api.ClientModInitializer
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents
@@ -32,6 +34,7 @@ object RvlAddonsClient : ClientModInitializer {
     override fun onInitializeClient() {
         RvlAddonsConfigStore.load(FabricLoader.getInstance().configDir.resolve("rvl-addons.properties"))
         ComaStateStore.load(FabricLoader.getInstance().configDir.resolve("rvl-addons-coma-state.properties"))
+        SkillProfileStore.load(FabricLoader.getInstance().configDir.resolve("rvl-addons-skill-profiles.properties"))
         ModEnabledState.set(RvlAddonsConfigStore.config.enabled)
         RvlAddonsHudRenderer.register()
 
@@ -78,12 +81,14 @@ object RvlAddonsClient : ClientModInitializer {
 
         ClientPlayConnectionEvents.JOIN.register { _, _, client ->
             ComaSwapController.reset()
+            CooldownController.clear()
             ComaSwapController.restorePersistedState(client)
         }
 
         ClientPlayConnectionEvents.DISCONNECT.register { _, client ->
             ComaSwapController.persistCurrentState(client)
             ComaSwapController.reset()
+            CooldownController.clear()
             updateRvlServerState(false)
         }
 
@@ -100,6 +105,7 @@ object RvlAddonsClient : ClientModInitializer {
             while (comaSwapKey.wasPressed()) {
                 ComaSwapController.requestSwap(client)
             }
+            CooldownController.observeInputTransitions(client)
             ComaSwapController.tick(client)
         }
     }
