@@ -153,3 +153,4 @@ object RvlAddonsHudRenderer {
         HudComponent.COMA -> RvlAddonsConfigStore.config.hudComa
     }
 }
+

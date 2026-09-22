@@ -439,3 +439,4 @@ class HudLayoutEditorScreen(private val parent: Screen?) : Screen(Text.literal("
         }
     }
 }
+
