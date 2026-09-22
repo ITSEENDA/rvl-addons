@@ -67,7 +67,7 @@ object RvlAddonsConfigScreen {
             .build()
 
         val comaGroup = OptionGroup.createBuilder()
-            .name(Text.literal("Co ma"))
+            .name(Text.literal("COMA"))
             .description(OptionDescription.of(Text.literal("COMA set capture, swapping and timing settings.")))
             .option(
                 Option.createBuilder<Int>()
@@ -119,7 +119,7 @@ object RvlAddonsConfigScreen {
             )
             .option(
                 ButtonOption.createBuilder()
-                    .name(Text.literal("Manage Co ma sets"))
+                    .name(Text.literal("Manage COMA sets"))
                     .text(Text.literal("Open"))
                     .description(OptionDescription.of(Text.literal("View captured items, inventory status and set actions.")))
                     .action { screen ->
