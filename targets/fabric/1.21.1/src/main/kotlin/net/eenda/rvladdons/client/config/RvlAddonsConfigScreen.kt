@@ -167,7 +167,7 @@ object RvlAddonsConfigScreen {
                         Option.createBuilder<Boolean>()
                             .name(Text.literal("Fast revive"))
                             .description(OptionDescription.of(Text.literal("Automatically respawn after death. It pauses itself after repeated rapid deaths.")))
-                            .binding(config.autoReviveEnabled, { config.autoReviveEnabled }, { config.autoReviveEnabled = it })
+                            .binding(config.autoRevive.enabled, { config.autoRevive.enabled }, { config.autoRevive.enabled = it })
                             .controller { BooleanControllerBuilder.create(it).coloured(true).onOffFormatter() }
                             .build()
                     )
@@ -175,14 +175,14 @@ object RvlAddonsConfigScreen {
                         Option.createBuilder<Boolean>()
                             .name(Text.literal("Enable RBD"))
                             .description(OptionDescription.of(Text.literal("If you know, you know")))
-                            .binding(config.rbdSoundEnabled, { config.rbdSoundEnabled }, { config.rbdSoundEnabled = it })
+                            .binding(config.autoRevive.soundEnabled, { config.autoRevive.soundEnabled }, { config.autoRevive.soundEnabled = it })
                             .controller { BooleanControllerBuilder.create(it).coloured(true).onOffFormatter() }
                             .build()
                     )
                     .option(
                         Option.createBuilder<Float>()
                             .name(Text.literal("Auto revive sound volume"))
-                            .binding(config.autoReviveSoundVolume, { config.autoReviveSoundVolume }, { config.autoReviveSoundVolume = it.coerceIn(0f, 1f) })
+                            .binding(config.autoRevive.soundVolume, { config.autoRevive.soundVolume }, { config.autoRevive.soundVolume = it.coerceIn(0f, 1f) })
                             .controller { FloatSliderControllerBuilder.create(it).range(0f, 1f).step(0.01f) }
                             .build()
                     )
@@ -190,7 +190,7 @@ object RvlAddonsConfigScreen {
                         Option.createBuilder<Int>()
                             .name(Text.literal("Respawn delay (ms)"))
                             .description(OptionDescription.of(Text.literal("Delay before sending the respawn action. 0 disables the delay.")))
-                            .binding(config.autoReviveRespawnDelayMs, { config.autoReviveRespawnDelayMs }, { config.autoReviveRespawnDelayMs = it.coerceIn(0, 5000) })
+                            .binding(config.autoRevive.respawnDelayMs, { config.autoRevive.respawnDelayMs }, { config.autoRevive.respawnDelayMs = it.coerceIn(0, 5000) })
                             .controller { IntegerFieldControllerBuilder.create(it).range(0, 5000) }
                             .build()
                     )
@@ -198,14 +198,14 @@ object RvlAddonsConfigScreen {
                         Option.createBuilder<Int>()
                             .name(Text.literal("Respawn to /back delay (ms)"))
                             .description(OptionDescription.of(Text.literal("Delay after respawn before sending /back. 0 disables the delay.")))
-                            .binding(config.autoReviveBackDelayMs, { config.autoReviveBackDelayMs }, { config.autoReviveBackDelayMs = it.coerceIn(0, 5000) })
+                            .binding(config.autoRevive.backDelayMs, { config.autoRevive.backDelayMs }, { config.autoRevive.backDelayMs = it.coerceIn(0, 5000) })
                             .controller { IntegerFieldControllerBuilder.create(it).range(0, 5000) }
                             .build()
                     )
                     .option(
                         Option.createBuilder<AutoReviveMode>()
                             .name(Text.literal("Mode"))
-                            .binding(config.autoReviveMode, { config.autoReviveMode }, { config.autoReviveMode = it })
+                            .binding(config.autoRevive.mode, { config.autoRevive.mode }, { config.autoRevive.mode = it })
                             .controller { EnumControllerBuilder.create(it).enumClass(AutoReviveMode::class.java) }
                             .build()
                     )

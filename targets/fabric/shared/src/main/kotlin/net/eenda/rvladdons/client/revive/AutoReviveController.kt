@@ -1,11 +1,17 @@
 package net.eenda.rvladdons.client.revive
 
-import net.eenda.rvladdons.RvlAddonsClient
+import net.eenda.rvladdons.core.GameplayServerState
+import net.eenda.rvladdons.core.ModEnabledState
 import net.eenda.rvladdons.core.RvlAddonsConfigStore
 import net.eenda.rvladdons.feature.revive.AutoReviveMode
+import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper
 import net.minecraft.client.MinecraftClient
 import net.minecraft.client.network.ClientPlayerEntity
+import net.minecraft.client.option.KeyBinding
+import net.minecraft.client.util.InputUtil
+import net.minecraft.text.Text
 import net.minecraft.util.math.Vec3d
+import org.lwjgl.glfw.GLFW
 
 object AutoReviveController {
     private enum class Phase {
@@ -23,6 +29,34 @@ object AutoReviveController {
     private var phaseStartedAt = 0L
     private var positionBeforeBack: Vec3d? = null
     private var soundWasDead = false
+    private lateinit var autoReviveKey: KeyBinding
+
+    fun registerKeyBinding() {
+        autoReviveKey = KeyBindingHelper.registerKeyBinding(
+            KeyBinding(
+                "key.rvl-addons.toggle_auto_revive",
+                InputUtil.Type.KEYSYM,
+                GLFW.GLFW_KEY_F10,
+                "category.rvl-addons"
+            )
+        )
+    }
+
+    fun handleKeyBinding() {
+        while (autoReviveKey.wasPressed()) {
+            val config = RvlAddonsConfigStore.config
+            config.autoRevive.enabled = !config.autoRevive.enabled
+            RvlAddonsConfigStore.save()
+            resetAutoOnly()
+            MinecraftClient.getInstance().inGameHud.setOverlayMessage(
+                Text.literal(if (config.autoRevive.enabled) "Fast revive: ENABLED" else "Fast revive: DISABLED"),
+                false
+            )
+        }
+    }
+
+    private fun gameplayServerActive(): Boolean =
+        ModEnabledState.isEnabled() && GameplayServerState.isActive()
 
     fun tick(client: MinecraftClient) {
         val config = RvlAddonsConfigStore.config
@@ -34,7 +68,7 @@ object AutoReviveController {
         val dead = player.isDead || player.health <= 0f
         observeRespawnSound(client, config, dead)
 
-        if (!config.autoReviveEnabled || !RvlAddonsClient.isGameplayServerActive()) {
+        if (!config.autoRevive.enabled || !gameplayServerActive()) {
             resetAutoState()
             return
         }
@@ -43,7 +77,7 @@ object AutoReviveController {
             when (phase) {
                 Phase.IDLE -> {
                     phaseStartedAt = now
-                    if (config.autoReviveRespawnDelayMs > 0) {
+                    if (config.autoRevive.respawnDelayMs > 0) {
                         phase = Phase.WAITING_RESPAWN_DELAY
                     } else {
                         player.requestRespawn()
@@ -51,7 +85,7 @@ object AutoReviveController {
                     }
                 }
                 Phase.WAITING_RESPAWN_DELAY -> {
-                    if (now - phaseStartedAt >= config.autoReviveRespawnDelayMs) {
+                    if (now - phaseStartedAt >= config.autoRevive.respawnDelayMs) {
                         player.requestRespawn()
                         phase = Phase.WAITING_RESPAWN
                         phaseStartedAt = now
@@ -66,12 +100,12 @@ object AutoReviveController {
 
         when (phase) {
             Phase.WAITING_RESPAWN -> {
-                if (config.autoReviveMode == AutoReviveMode.INSTANT) {
+                if (config.autoRevive.mode == AutoReviveMode.INSTANT) {
                     playAudioIfEnabled(client)
                     resetPhase()
                 } else {
                     positionBeforeBack = player.pos
-                    if (config.autoReviveBackDelayMs > 0) {
+                    if (config.autoRevive.backDelayMs > 0) {
                         phase = Phase.WAITING_BACK_DELAY
                         phaseStartedAt = now
                     } else {
@@ -80,7 +114,7 @@ object AutoReviveController {
                 }
             }
             Phase.WAITING_BACK_DELAY -> {
-                if (now - phaseStartedAt >= config.autoReviveBackDelayMs) {
+                if (now - phaseStartedAt >= config.autoRevive.backDelayMs) {
                     sendBack(player, now)
                 }
             }
@@ -126,8 +160,8 @@ object AutoReviveController {
 
     private fun playAudioIfEnabled(client: MinecraftClient) {
         val config = RvlAddonsConfigStore.config
-        if (config.rbdSoundEnabled) {
-            client.soundManager.playNextTick(AutoReviveAudio(client, config.autoReviveSoundVolume))
+        if (config.autoRevive.soundEnabled) {
+            client.soundManager.playNextTick(AutoReviveAudio(client, config.autoRevive.soundVolume))
         }
     }
 
@@ -142,7 +176,7 @@ object AutoReviveController {
         }
         if (soundWasDead) {
             soundWasDead = false
-            if (!config.autoReviveEnabled && RvlAddonsClient.isGameplayServerActive()) {
+            if (!config.autoRevive.enabled && gameplayServerActive()) {
                 playAudioIfEnabled(client)
             }
         }

@@ -31,7 +31,6 @@ object RvlAddonsClient : ClientModInitializer {
     private lateinit var modToggleKey: KeyBinding
     private lateinit var settingsKey: KeyBinding
     private lateinit var comaSwapKey: KeyBinding
-    private lateinit var autoReviveKey: KeyBinding
 
     override fun onInitializeClient() {
         RvlAddonsConfigStore.load(FabricLoader.getInstance().configDir.resolve("rvl-addons.properties"))
@@ -39,6 +38,7 @@ object RvlAddonsClient : ClientModInitializer {
         SkillProfileStore.load(FabricLoader.getInstance().configDir.resolve("rvl-addons-skill-profiles.properties"))
         ModEnabledState.set(RvlAddonsConfigStore.config.enabled)
         RvlAddonsHudRenderer.register()
+        AutoReviveController.registerKeyBinding()
 
         traceKey = KeyBindingHelper.registerKeyBinding(
             KeyBinding(
@@ -72,15 +72,6 @@ object RvlAddonsClient : ClientModInitializer {
                 "category.rvl-addons"
             )
         )
-        autoReviveKey = KeyBindingHelper.registerKeyBinding(
-            KeyBinding(
-                "key.rvl-addons.toggle_auto_revive",
-                InputUtil.Type.KEYSYM,
-                GLFW.GLFW_KEY_F10,
-                "category.rvl-addons"
-            )
-        )
-
         ClientSendMessageEvents.CHAT.register { message ->
             RvlAddonsTrace.log("chat-out", message)
         }
@@ -117,9 +108,7 @@ object RvlAddonsClient : ClientModInitializer {
             while (comaSwapKey.wasPressed()) {
                 ComaSwapController.requestSwap(client)
             }
-            while (autoReviveKey.wasPressed()) {
-                toggleAutoRevive()
-            }
+            AutoReviveController.handleKeyBinding()
             CooldownController.observeInputTransitions(client)
             AutoReviveController.tick(client)
             ComaSwapController.tick(client)
@@ -156,17 +145,6 @@ object RvlAddonsClient : ClientModInitializer {
         RvlAddonsTrace.log("mod-state", "enabled=$enabled")
         MinecraftClient.getInstance().inGameHud.setOverlayMessage(
             Text.literal(if (enabled) "RVL Addons: ENABLED" else "RVL Addons: DISABLED"),
-            false
-        )
-    }
-
-    private fun toggleAutoRevive() {
-        val config = RvlAddonsConfigStore.config
-        config.autoReviveEnabled = !config.autoReviveEnabled
-        RvlAddonsConfigStore.save()
-        AutoReviveController.resetAutoOnly()
-        MinecraftClient.getInstance().inGameHud.setOverlayMessage(
-            Text.literal(if (config.autoReviveEnabled) "Fast revive: ENABLED" else "Fast revive: DISABLED"),
             false
         )
     }
