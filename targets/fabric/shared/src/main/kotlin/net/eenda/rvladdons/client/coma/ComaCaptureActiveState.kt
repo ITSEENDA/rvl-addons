@@ -10,7 +10,7 @@ import net.minecraft.client.gui.screen.ingame.HandledScreen
 import net.minecraft.item.ItemStack
 import net.minecraft.screen.slot.SlotActionType
 
-internal class ComaCaptureActiveState(owner: ComaSwapController) : ComaCaptureState(owner) {
+internal class ComaCaptureActiveState(owner: ComaSwapController) : ComaState(owner) {
     internal var completed = false
     private val pendingClicks = mutableListOf<PendingCaptureClick>()
 
@@ -114,3 +114,4 @@ internal class ComaCaptureActiveState(owner: ComaSwapController) : ComaCaptureSt
 private data class PendingCaptureClick(
     val stack: ItemStack
 )
+

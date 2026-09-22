@@ -6,7 +6,7 @@ import net.minecraft.client.MinecraftClient
 import net.minecraft.client.gui.screen.ingame.HandledScreen
 import net.minecraft.item.ItemStack
 
-internal class ComaLocalFinishingState(owner: ComaSwapController) : ComaSwapState(owner) {
+internal class ComaLocalFinishingState(owner: ComaSwapController) : ComaState(owner) {
     internal var completed = false
     private var finishAt = 0L
     private var finishImmediately = false
@@ -65,3 +65,4 @@ internal class ComaLocalFinishingState(owner: ComaSwapController) : ComaSwapStat
         owner.nextSwapAllowedAt = System.currentTimeMillis() + ComaSwapController.SWAP_REARM_MS
     }
 }
+

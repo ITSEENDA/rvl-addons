@@ -1,6 +1,6 @@
 package net.eenda.rvladdons.client.coma
 
-internal class ComaLocalWaitingForMoveState(owner: ComaSwapController) : ComaSwapState(owner) {
+internal class ComaLocalWaitingForMoveState(owner: ComaSwapController) : ComaState(owner) {
     internal var readyForMove = false
     private var moveAt = 0L
 
@@ -20,3 +20,4 @@ internal class ComaLocalWaitingForMoveState(owner: ComaSwapController) : ComaSwa
         readyForMove = true
     }
 }
+

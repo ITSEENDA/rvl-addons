@@ -1,12 +1,14 @@
 package net.eenda.rvladdons.core.state
 
 class StateMachine {
+    private data class Transition(val to: IState, val condition: () -> Boolean)
+
     private class StateNode(val state: IState) {
-        val transitions = LinkedHashSet<ITransition>()
+        val transitions = LinkedHashSet<Transition>()
     }
 
     private val states = LinkedHashMap<Class<out IState>, StateNode>()
-    private val globalTransitions = LinkedHashSet<ITransition>()
+    private val globalTransitions = LinkedHashSet<Transition>()
     private var current: StateNode? = null
 
     val currentState: IState?
@@ -15,10 +17,6 @@ class StateMachine {
     fun update() {
         getTransition()?.let { changeState(it.to) }
         current?.state?.onUpdate()
-    }
-
-    fun fixedUpdate() {
-        current?.state?.onFixedUpdate()
     }
 
     fun setState(state: IState) {
@@ -38,17 +36,17 @@ class StateMachine {
         current = next
     }
 
-    fun addTransitionFrom(from: IState, to: IState, condition: IPredicate) {
+    fun addTransitionFrom(from: IState, to: IState, condition: () -> Boolean) {
         getOrAddState(from).transitions += Transition(getOrAddState(to).state, condition)
     }
 
-    fun addTransition(to: IState, condition: IPredicate) {
+    fun addTransition(to: IState, condition: () -> Boolean) {
         globalTransitions += Transition(getOrAddState(to).state, condition)
     }
 
-    private fun getTransition(): ITransition? {
-        globalTransitions.firstOrNull { it.condition.evaluate() }?.let { return it }
-        return current?.transitions?.firstOrNull { it.condition.evaluate() }
+    private fun getTransition(): Transition? {
+        globalTransitions.firstOrNull { it.condition() }?.let { return it }
+        return current?.transitions?.firstOrNull { it.condition() }
     }
 
     private fun getOrAddState(state: IState): StateNode =

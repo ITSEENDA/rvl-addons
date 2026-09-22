@@ -17,6 +17,3 @@ internal abstract class ComaState(
     ) = Unit
 }
 
-internal abstract class ComaCaptureState(owner: ComaSwapController) : ComaState(owner)
-
-internal abstract class ComaSwapState(owner: ComaSwapController) : ComaState(owner)

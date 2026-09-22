@@ -5,7 +5,6 @@ import dev.tako.libs.client.ui.feedback.TakoToastManager
 import net.eenda.rvladdons.core.RvlAddonsConfigStore
 import net.eenda.rvladdons.core.RvlAddonsTrace
 import net.eenda.rvladdons.core.RvlTextMatcher
-import net.eenda.rvladdons.core.state.PredicateFunc
 import net.eenda.rvladdons.core.state.StateMachine
 import net.eenda.rvladdons.feature.coma.ComaItemRuleCodec
 import net.eenda.rvladdons.feature.coma.ComaInventorySnapshot
@@ -87,92 +86,24 @@ object ComaSwapController {
 
     init {
         stateMachine.setState(idleState)
-        stateMachine.addTransitionFrom(
-            captureOpeningState,
-            captureClearingState,
-            PredicateFunc { captureOpeningState.menuReady && captureOpeningState.needsClearing }
-        )
-        stateMachine.addTransitionFrom(
-            captureOpeningState,
-            captureActiveState,
-            PredicateFunc { captureOpeningState.menuReady && !captureOpeningState.needsClearing }
-        )
-        stateMachine.addTransitionFrom(
-            captureClearingState,
-            captureActiveState,
-            PredicateFunc { captureClearingState.clearFinished }
-        )
-        stateMachine.addTransitionFrom(
-            captureActiveState,
-            idleState,
-            PredicateFunc { captureActiveState.completed }
-        )
-        stateMachine.addTransitionFrom(
-            swapOpeningState,
-            swapPlanningState,
-            PredicateFunc { swapOpeningState.menuReady }
-        )
-        stateMachine.addTransitionFrom(
-            swapPlanningState,
-            localClearingState,
-            PredicateFunc { swapPlanningState.canEnterLocalClearing() }
-        )
-        stateMachine.addTransitionFrom(
-            swapPlanningState,
-            serverSwappingState,
-            PredicateFunc { swapPlanningState.canEnterServerSwapping() }
-        )
-        stateMachine.addTransitionFrom(
-            swapPlanningState,
-            swapVerifyingState,
-            PredicateFunc { swapPlanningState.canEnterVerifying() }
-        )
-        stateMachine.addTransitionFrom(
-            swapPlanningState,
-            localFinishingState,
-            PredicateFunc { swapPlanningState.canEnterLocalFinishing() }
-        )
-        stateMachine.addTransitionFrom(
-            localClearingState,
-            localWaitingForMoveState,
-            PredicateFunc { localClearingState.readyForMove && localClearingState.waitForMove }
-        )
-        stateMachine.addTransitionFrom(
-            localClearingState,
-            localMovingState,
-            PredicateFunc { localClearingState.readyForMove && !localClearingState.waitForMove }
-        )
-        stateMachine.addTransitionFrom(
-            localClearingState,
-            localFinishingState,
-            PredicateFunc { localClearingState.readyForFinish }
-        )
-        stateMachine.addTransitionFrom(
-            localWaitingForMoveState,
-            localMovingState,
-            PredicateFunc { localWaitingForMoveState.readyForMove }
-        )
-        stateMachine.addTransitionFrom(
-            localMovingState,
-            localFinishingState,
-            PredicateFunc { localMovingState.readyForFinish }
-        )
-        stateMachine.addTransitionFrom(
-            localFinishingState,
-            idleState,
-            PredicateFunc { localFinishingState.completed }
-        )
-        stateMachine.addTransitionFrom(
-            serverSwappingState,
-            swapVerifyingState,
-            PredicateFunc { serverSwappingState.readyForVerification }
-        )
-        stateMachine.addTransitionFrom(
-            swapVerifyingState,
-            idleState,
-            PredicateFunc { swapVerifyingState.verified }
-        )
-        stateMachine.addTransition(idleState, PredicateFunc {
+        stateMachine.addTransitionFrom(captureOpeningState, captureClearingState, { captureOpeningState.menuReady && captureOpeningState.needsClearing })
+        stateMachine.addTransitionFrom(captureOpeningState, captureActiveState, { captureOpeningState.menuReady && !captureOpeningState.needsClearing })
+        stateMachine.addTransitionFrom(captureClearingState, captureActiveState, { captureClearingState.clearFinished })
+        stateMachine.addTransitionFrom(captureActiveState, idleState, { captureActiveState.completed })
+        stateMachine.addTransitionFrom(swapOpeningState, swapPlanningState, { swapOpeningState.menuReady })
+        stateMachine.addTransitionFrom(swapPlanningState, localClearingState, { swapPlanningState.canEnterLocalClearing() })
+        stateMachine.addTransitionFrom(swapPlanningState, serverSwappingState, { swapPlanningState.canEnterServerSwapping() })
+        stateMachine.addTransitionFrom(swapPlanningState, swapVerifyingState, { swapPlanningState.canEnterVerifying() })
+        stateMachine.addTransitionFrom(swapPlanningState, localFinishingState, { swapPlanningState.canEnterLocalFinishing() })
+        stateMachine.addTransitionFrom(localClearingState, localWaitingForMoveState, { localClearingState.readyForMove && localClearingState.waitForMove })
+        stateMachine.addTransitionFrom(localClearingState, localMovingState, { localClearingState.readyForMove && !localClearingState.waitForMove })
+        stateMachine.addTransitionFrom(localClearingState, localFinishingState, { localClearingState.readyForFinish })
+        stateMachine.addTransitionFrom(localWaitingForMoveState, localMovingState, { localWaitingForMoveState.readyForMove })
+        stateMachine.addTransitionFrom(localMovingState, localFinishingState, { localMovingState.readyForFinish })
+        stateMachine.addTransitionFrom(localFinishingState, idleState, { localFinishingState.completed })
+        stateMachine.addTransitionFrom(serverSwappingState, swapVerifyingState, { serverSwappingState.readyForVerification })
+        stateMachine.addTransitionFrom(swapVerifyingState, idleState, { swapVerifyingState.verified })
+        stateMachine.addTransition(idleState, {
             abortReason != null && stateMachine.currentState !== idleState
         })
     }
@@ -201,11 +132,7 @@ object ComaSwapController {
         }
 
         val currentPosition = candidates.indexOfFirst { it.index == selectedSetIndex }
-        val next = if (currentPosition < 0) {
-            candidates.first()
-        } else {
-            candidates[(currentPosition + 1) % candidates.size]
-        }
+        val next = if (currentPosition < 0) candidates.first() else candidates[(currentPosition + 1) % candidates.size]
         if (next.value.rules().all(String::isBlank)) {
             notify(client, "RVL COMA: selected set has no item rules")
             return
@@ -312,19 +239,23 @@ object ComaSwapController {
     }
 
     fun onSetReordered(from: Int, to: Int) {
-        if (selectedSetIndex == from) {
-            selectedSetIndex = to
-        } else if (from < to && selectedSetIndex in (from + 1)..to) {
-            selectedSetIndex--
-        } else if (to < from && selectedSetIndex in to until from) {
-            selectedSetIndex++
+        when {
+            selectedSetIndex == from -> {
+                selectedSetIndex = to
+            }
+            from < to && selectedSetIndex in (from + 1)..to -> {
+                selectedSetIndex--
+            }
+            to < from && selectedSetIndex in to until from -> {
+                selectedSetIndex++
+            }
         }
     }
 
     fun hudText(): String {
         val set = RvlAddonsConfigStore.config.comaSets.getOrNull(confirmedSetIndex)
             ?: return "COMA: NOT VERIFIED"
-        return "COMA: ${set.name.ifBlank { "Set ${confirmedSetIndex + 1}" }}"
+        return "Current set: ${set.name.ifBlank { "Set ${confirmedSetIndex + 1}" }}"
     }
 
     fun hudLines(): List<String> {
@@ -363,7 +294,7 @@ object ComaSwapController {
         val set = RvlAddonsConfigStore.config.comaSets.getOrNull(setIndex)
             ?: return List(4) { null }
         val inventory = client.player?.inventory?.let { it.main + it.armor + it.offHand } ?: emptyList()
-        return set.rules().mapIndexed { index, rule ->
+        return set.rules().mapIndexed { _, rule ->
             if (rule.isBlank()) null
             else inventory.firstOrNull { FabricComaItemAdapter.matches(it, rule) }?.copy()
         }
@@ -425,6 +356,7 @@ object ComaSwapController {
         clearPendingHud()
     }
 
+
     internal fun failCapture(client: MinecraftClient, reason: String) {
         val returnScreen = capture?.returnScreen
         RvlAddonsTrace.log("coma", "capture-failed reason=$reason")
@@ -451,8 +383,7 @@ object ComaSwapController {
         return normalized.contains(COMA_TITLE_TOKEN) || normalized.contains("COMA")
     }
 
-    internal fun displayName(set: ComaSetConfig): String =
-        set.name.ifBlank { "Set ${selectedSetIndex + 1}" }
+    internal fun displayName(set: ComaSetConfig): String = set.name.ifBlank { "Set ${selectedSetIndex + 1}" }
 
     internal fun roleName(index: Int): String = ComaRole.fromIndex(index)?.key ?: "unknown"
 
@@ -516,3 +447,4 @@ object ComaSwapController {
     }
 
 }
+

@@ -5,7 +5,7 @@ import net.eenda.rvladdons.core.RvlAddonsTrace
 import net.minecraft.client.MinecraftClient
 import net.minecraft.client.gui.screen.ingame.HandledScreen
 
-internal class ComaLocalClearingState(owner: ComaSwapController) : ComaSwapState(owner) {
+internal class ComaLocalClearingState(owner: ComaSwapController) : ComaState(owner) {
     internal var readyForMove = false
     internal var waitForMove = false
     internal var readyForFinish = false
@@ -94,3 +94,4 @@ internal class ComaLocalClearingState(owner: ComaSwapController) : ComaSwapState
         }
     }
 }
+

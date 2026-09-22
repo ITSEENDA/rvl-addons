@@ -36,3 +36,4 @@ internal data class SwapRequest(
     var expectedRules: List<String> = emptyList(),
     val steps: ArrayDeque<ComaClickStep> = ArrayDeque()
 )
+

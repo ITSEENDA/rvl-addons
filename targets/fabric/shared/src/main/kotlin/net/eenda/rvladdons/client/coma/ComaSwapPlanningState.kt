@@ -7,7 +7,7 @@ import net.eenda.rvladdons.feature.coma.ComaSwapPlanner
 import net.minecraft.client.MinecraftClient
 import net.minecraft.client.gui.screen.ingame.HandledScreen
 
-internal class ComaSwapPlanningState(owner: ComaSwapController) : ComaSwapState(owner) {
+internal class ComaSwapPlanningState(owner: ComaSwapController) : ComaState(owner) {
     internal var planReady = false
     private var planDeadline = 0L
     private var lastPlanMissing = ""
@@ -98,3 +98,4 @@ internal class ComaSwapPlanningState(owner: ComaSwapController) : ComaSwapState(
         return planReady && !current.verifyWithServer && current.steps.isEmpty()
     }
 }
+

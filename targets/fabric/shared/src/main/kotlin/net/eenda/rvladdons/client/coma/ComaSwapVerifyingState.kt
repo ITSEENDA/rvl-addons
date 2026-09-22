@@ -6,7 +6,7 @@ import net.eenda.rvladdons.core.RvlAddonsTrace
 import net.minecraft.client.MinecraftClient
 import net.minecraft.client.gui.screen.ingame.HandledScreen
 
-internal class ComaSwapVerifyingState(owner: ComaSwapController) : ComaSwapState(owner) {
+internal class ComaSwapVerifyingState(owner: ComaSwapController) : ComaState(owner) {
     internal var verified = false
     private var verifyAt = 0L
     private var verifyDeadline = 0L
@@ -85,3 +85,4 @@ internal class ComaSwapVerifyingState(owner: ComaSwapController) : ComaSwapState
         verified = true
     }
 }
+

@@ -5,7 +5,7 @@ import net.eenda.rvladdons.core.RvlAddonsTrace
 import net.minecraft.client.MinecraftClient
 import net.minecraft.client.gui.screen.ingame.HandledScreen
 
-internal class ComaLocalMovingState(owner: ComaSwapController) : ComaSwapState(owner) {
+internal class ComaLocalMovingState(owner: ComaSwapController) : ComaState(owner) {
     internal var readyForFinish = false
     private var nextStepAt = 0L
     private var moveClicks = 0
@@ -69,3 +69,4 @@ internal class ComaLocalMovingState(owner: ComaSwapController) : ComaSwapState(o
         readyForFinish = true
     }
 }
+

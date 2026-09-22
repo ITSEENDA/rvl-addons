@@ -7,7 +7,7 @@ import net.eenda.rvladdons.feature.coma.ComaRole
 import net.minecraft.client.MinecraftClient
 import net.minecraft.client.gui.screen.ingame.HandledScreen
 
-internal class ComaServerSwappingState(owner: ComaSwapController) : ComaSwapState(owner) {
+internal class ComaServerSwappingState(owner: ComaSwapController) : ComaState(owner) {
     internal var readyForVerification = false
     private var nextStepAt = 0L
     private var stepStartedAt = 0L
@@ -114,3 +114,4 @@ internal class ComaServerSwappingState(owner: ComaSwapController) : ComaSwapStat
         }
     }
 }
+

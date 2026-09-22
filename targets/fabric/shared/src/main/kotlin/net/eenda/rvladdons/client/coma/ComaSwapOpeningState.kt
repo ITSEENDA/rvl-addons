@@ -6,7 +6,7 @@ import net.eenda.rvladdons.core.RvlAddonsTrace
 import net.minecraft.client.MinecraftClient
 import net.minecraft.client.gui.screen.ingame.HandledScreen
 
-internal class ComaSwapOpeningState(owner: ComaSwapController) : ComaSwapState(owner) {
+internal class ComaSwapOpeningState(owner: ComaSwapController) : ComaState(owner) {
     internal var menuReady = false
 
     override fun onEnter() {
@@ -45,3 +45,4 @@ internal class ComaSwapOpeningState(owner: ComaSwapController) : ComaSwapState(o
         menuReady = true
     }
 }
+

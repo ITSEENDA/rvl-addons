@@ -82,7 +82,7 @@ class ComaSetEditorScreen(
         val stacks = client?.let { ComaSwapController.inventoryStacks(it, setIndex) }
             ?: List(4) { null }
 
-        roles.forEachIndexed { index, role ->
+        roles.forEachIndexed { index, _ ->
             val y = 84 + index * 35
             context.fill(174, y - 5, width - 20, y + 25, 0xDD181818.toInt())
             context.fill(174, y - 5, width - 20, y - 4, 0xEE555555.toInt())
@@ -152,3 +152,4 @@ class ComaSetEditorScreen(
     private fun enabledText(set: ComaSetConfig): Text =
         Text.literal(if (set.enabled) "Enabled" else "Disabled")
 }
+

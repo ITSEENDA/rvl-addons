@@ -46,3 +46,4 @@ class ComaInventorySyncCache {
             .also { snapshots[syncId] = it }
     }
 }
+

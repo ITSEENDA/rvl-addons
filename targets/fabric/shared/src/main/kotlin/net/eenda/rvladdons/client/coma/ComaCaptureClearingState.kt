@@ -7,7 +7,7 @@ import net.minecraft.client.gui.screen.ingame.HandledScreen
 import net.minecraft.item.ItemStack
 import net.minecraft.screen.slot.SlotActionType
 
-internal class ComaCaptureClearingState(owner: ComaSwapController) : ComaCaptureState(owner) {
+internal class ComaCaptureClearingState(owner: ComaSwapController) : ComaState(owner) {
     internal var clearFinished = false
 
     override fun onEnter() {
@@ -124,3 +124,4 @@ internal class ComaCaptureClearingState(owner: ComaSwapController) : ComaCapture
         }
     }
 }
+

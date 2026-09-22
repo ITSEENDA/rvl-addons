@@ -6,7 +6,7 @@ import net.minecraft.client.MinecraftClient
 import net.minecraft.client.gui.screen.ingame.HandledScreen
 import net.minecraft.item.ItemStack
 
-internal class ComaCaptureOpeningState(owner: ComaSwapController) : ComaCaptureState(owner) {
+internal class ComaCaptureOpeningState(owner: ComaSwapController) : ComaState(owner) {
     internal var menuReady = false
     internal var needsClearing = false
 
@@ -74,3 +74,4 @@ internal class ComaCaptureOpeningState(owner: ComaSwapController) : ComaCaptureS
         needsClearing = current.clearSlots.isNotEmpty()
     }
 }
+
