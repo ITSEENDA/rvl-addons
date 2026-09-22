@@ -12,6 +12,9 @@ import net.eenda.rvladdons.client.config.RvlAddonsConfigScreen
 import net.eenda.rvladdons.client.cooldown.CooldownController
 import net.eenda.rvladdons.client.hud.RvlAddonsHudRenderer
 import net.eenda.rvladdons.client.revive.AutoReviveController
+import net.eenda.rvladdons.client.party.LocalPartyController
+import net.eenda.rvladdons.client.party.PartyHudRenderer
+import net.eenda.rvladdons.client.party.PartyScreen
 import net.fabricmc.api.ClientModInitializer
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper
@@ -32,6 +35,7 @@ object RvlAddonsClient : ClientModInitializer {
     private lateinit var modToggleKey: KeyBinding
     private lateinit var settingsKey: KeyBinding
     private lateinit var comaSwapKey: KeyBinding
+    private lateinit var partyKey: KeyBinding
 
     override fun onInitializeClient() {
         val configDir = FabricLoader.getInstance().configDir
@@ -48,9 +52,11 @@ object RvlAddonsClient : ClientModInitializer {
             SkillProfileStore.accountProfilePath(configDir, session.uuidOrNull, session.username),
             SkillProfileStore.legacyProfilePath(configDir)
         )
+        LocalPartyController.initialize()
         ModEnabledState.set(RvlAddonsConfigStore.config.enabled)
         RvlAddonsHudRenderer.register()
         AutoReviveController.registerKeyBinding()
+        PartyHudRenderer.register()
 
         traceKey = KeyBindingHelper.registerKeyBinding(
             KeyBinding(
@@ -81,6 +87,14 @@ object RvlAddonsClient : ClientModInitializer {
                 "key.rvl-addons.swap_coma_set",
                 InputUtil.Type.KEYSYM,
                 GLFW.GLFW_KEY_K,
+                "category.rvl-addons"
+            )
+        )
+        partyKey = KeyBindingHelper.registerKeyBinding(
+            KeyBinding(
+                "key.rvl-addons.open_party",
+                InputUtil.Type.KEYSYM,
+                GLFW.GLFW_KEY_P,
                 "category.rvl-addons"
             )
         )
@@ -121,6 +135,10 @@ object RvlAddonsClient : ClientModInitializer {
                 ComaSwapController.requestSwap(client)
             }
             AutoReviveController.handleKeyBinding()
+            while (partyKey.wasPressed()) {
+                client.setScreen(PartyScreen(client.currentScreen))
+            }
+            LocalPartyController.tick(client)
             CooldownController.observeInputTransitions(client)
             AutoReviveController.tick(client)
             ComaSwapController.tick(client)
