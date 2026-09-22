@@ -163,3 +163,4 @@ internal class CooldownServerCorrelation(
     private fun isPassiveTrigger(trigger: SkillTrigger): Boolean =
         trigger == SkillTrigger.PASSIVE_DAMAGED || trigger == SkillTrigger.PASSIVE
 }
+

@@ -188,3 +188,4 @@ object CooldownController {
     private fun compactName(stack: ItemStack): String = if (stack.isEmpty) "empty" else stack.name.string.take(80)
 
 }
+

@@ -91,3 +91,4 @@ internal class CooldownRuntimeStore(private val pending: CooldownPendingActionSt
     private fun isPassive(trigger: SkillTrigger): Boolean =
         trigger == SkillTrigger.PASSIVE_DAMAGED || trigger == SkillTrigger.PASSIVE
 }
+

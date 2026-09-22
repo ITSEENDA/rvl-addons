@@ -62,3 +62,4 @@ class CooldownProfileEditScreen(
         SkillProfileStore.save()
     }
 }
+

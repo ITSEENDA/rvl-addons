@@ -30,7 +30,9 @@ internal class CooldownActionTracker {
         lastGroundedAt = 0L
     }
 
-    fun markClick(now: Long) { lastClickAt = now }
+    fun markClick(now: Long) {
+        lastClickAt = now
+    }
 
     fun jumpWasRecent(now: Long): Boolean = now - lastJumpPressAt in 0..HAND_DUPLICATE_WINDOW_MS
 
@@ -50,14 +52,20 @@ internal class CooldownActionTracker {
         val grounded = canActivateSkill(player)
         val sneaking = player.isSneaking
         if (sneaking && !wasSneaking) {
-            val trigger = if (now - lastSneakPressAt <= DOUBLE_SNEAK_WINDOW_MS) SkillTrigger.DOUBLE_SNEAK else SkillTrigger.SNEAK_HOLD
+            val trigger = if (now - lastSneakPressAt <= DOUBLE_SNEAK_WINDOW_MS) {
+                SkillTrigger.DOUBLE_SNEAK
+            } else {
+                SkillTrigger.SNEAK_HOLD
+            }
             if (grounded) onGesture(trigger, player)
             lastSneakPressAt = now
         }
         val jumping = client.options.jumpKey.isPressed
         if (jumping && !wasJumping) {
             lastJumpPressAt = now
-            if (grounded && now - lastClickAt > HAND_DUPLICATE_WINDOW_MS) onGesture(SkillTrigger.JUMP, player)
+            if (grounded && now - lastClickAt > HAND_DUPLICATE_WINDOW_MS) {
+                onGesture(SkillTrigger.JUMP, player)
+            }
         }
         wasSneaking = sneaking
         wasJumping = jumping
@@ -95,3 +103,4 @@ internal class CooldownActionTracker {
     private fun isPhysicallyGrounded(player: ClientPlayerEntity): Boolean =
         player.isOnGround || (player.verticalCollision && player.velocity.y <= 0.0)
 }
+

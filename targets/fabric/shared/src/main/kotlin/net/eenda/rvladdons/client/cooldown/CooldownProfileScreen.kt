@@ -16,7 +16,6 @@ import net.minecraft.client.gui.DrawContext
 import net.minecraft.client.gui.screen.Screen
 import net.minecraft.client.gui.widget.ButtonWidget
 import net.minecraft.text.Text
-import kotlin.math.ceil
 import kotlin.math.roundToInt
 
 class CooldownProfileScreen(private val parent: Screen?) : Screen(Text.literal("Cooldown Profiles")) {
@@ -35,13 +34,12 @@ class CooldownProfileScreen(private val parent: Screen?) : Screen(Text.literal("
         val delete: ButtonWidget
     )
 
-    private class ProfileGroup(
+    private data class ProfileGroup(
         val title: String,
-        val rows: List<ProfileRow>
-    ) {
-        var collapsed = false
-        var headerY = 0
-    }
+        val rows: List<ProfileRow>,
+        var headerY: Int = 0,
+        var collapsed: Boolean = false
+    )
 
     private val groups = mutableListOf<ProfileGroup>()
     private val scrollState = TakoScrollState(SCROLL_STEP)
@@ -102,8 +100,7 @@ class CooldownProfileScreen(private val parent: Screen?) : Screen(Text.literal("
                 val y = row.edit.y
                 if (y >= CONTENT_TOP && y + ROW_HEIGHT <= contentBottom()) {
                     TakoScreenChrome.drawPanel(context, 20, y, width - 40, ROW_HEIGHT - 4, TakoTheme.PANEL_CARD)
-                    val editX = editX()
-                    context.drawTextWithShadow(textRenderer, trimSummary(row.profile.label, editX - 32), 24, y + 5, 0xFFFFFF)
+                    context.drawTextWithShadow(textRenderer, trimSummary(row.profile.label, editX() - 32), 24, y + 5, 0xFFFFFF)
                     context.drawTextWithShadow(textRenderer, profileSummary(row.profile), 24, y + 24, 0xAAAAAA)
                 }
             }
@@ -178,41 +175,49 @@ class CooldownProfileScreen(private val parent: Screen?) : Screen(Text.literal("
             }
             group.headerY = cursor
             cursor += GROUP_HEADER_HEIGHT
-            group.rows.forEach { row ->
-                if (!matches(row.profile)) {
+            if (group.collapsed) {
+                group.rows.forEach { row ->
                     row.edit.visible = false
                     row.toggle.visible = false
                     row.delete.visible = false
-                    return@forEach
                 }
-                val y = cursor
-                row.edit.setDimensionsAndPosition(48, 20, editX(), y)
-                row.toggle.setDimensionsAndPosition(48, 20, toggleX(), y)
-                row.delete.setDimensionsAndPosition(42, 20, deleteX(), y)
-                val visible = !group.collapsed && y >= CONTENT_TOP && y + ROW_HEIGHT <= contentBottom()
-                row.edit.visible = visible
-                row.toggle.visible = visible
-                row.delete.visible = visible
-                cursor += ROW_HEIGHT
+            } else {
+                group.rows.forEach { row ->
+                    if (!matches(row.profile)) {
+                        row.edit.visible = false
+                        row.toggle.visible = false
+                        row.delete.visible = false
+                        return@forEach
+                    }
+                    val y = cursor
+                    row.edit.setDimensionsAndPosition(48, 20, editX(), y)
+                    row.toggle.setDimensionsAndPosition(48, 20, toggleX(), y)
+                    row.delete.setDimensionsAndPosition(42, 20, deleteX(), y)
+                    val visible = y >= CONTENT_TOP && y + ROW_HEIGHT <= contentBottom()
+                    row.edit.visible = visible
+                    row.toggle.visible = visible
+                    row.delete.visible = visible
+                    cursor += ROW_HEIGHT
+                }
             }
         }
     }
 
     private fun updateScrollBounds() {
         var contentHeight = 0
-        groups.forEach { group ->
-            val visibleRows = group.rows.count { row -> matches(row.profile) }
+        groups.forEach {
+            val visibleRows = it.rows.count { row -> matches(row.profile) }
             if (visibleRows == 0) return@forEach
             contentHeight += GROUP_HEADER_HEIGHT
-            if (!group.collapsed) contentHeight += visibleRows * ROW_HEIGHT
+            if (!it.collapsed) contentHeight += visibleRows * ROW_HEIGHT
         }
         scrollState.update(contentHeight, contentBottom() - CONTENT_TOP)
     }
 
+    private fun contentBottom(): Int = height - CONTENT_BOTTOM_MARGIN
     private fun editX(): Int = width - 174
     private fun toggleX(): Int = width - 120
     private fun deleteX(): Int = width - 66
-    private fun contentBottom(): Int = height - CONTENT_BOTTOM_MARGIN
     private fun reopen(): CooldownProfileScreen = CooldownProfileScreen(parent).also {
         it.query = query
         it.sourceFilter = sourceFilter
@@ -223,25 +228,17 @@ class CooldownProfileScreen(private val parent: Screen?) : Screen(Text.literal("
         updateScrollBounds()
         layoutRows()
     }
-
     private fun groupKey(profile: SkillProfile): String = when (profile.sourceType) {
         net.eenda.rvladdons.feature.cooldown.SkillSourceType.COMA_SET,
         net.eenda.rvladdons.feature.cooldown.SkillSourceType.EQUIPPED_SET -> "${profile.sourceType}:${profile.setId ?: profile.label}"
         else -> "${profile.sourceType}:${profile.sourceFingerprint}"
     }
-
-    private fun groupTitle(profile: SkillProfile): String {
-        val source = sourceLabel(profile.sourceType.name)
-        val title = if (profile.sourceType.name.endsWith("SET")) profile.label else profile.label.substringBefore(" - ")
-        return "$source | $title"
-    }
-
+    private fun groupTitle(profile: SkillProfile): String = "${sourceLabel(profile.sourceType.name)} | ${if (profile.sourceType.name.endsWith("SET")) profile.label else profile.label.substringBefore(" - ")}"
     private fun profileSummary(profile: SkillProfile): String {
         val tier = profile.setBonusLevel?.let { "Bo $it" } ?: "No tier"
         val cd = profile.cooldownHintMs?.let { "CD ${"%.1f".format(it / 1000.0)}s" } ?: "CD disabled"
         return "${sourceLabel(profile.sourceType.name)} | $tier | ${typeLabel(profile.skillType.name)} | ${triggerLabel(profile.trigger.name)} | $cd"
     }
-
     private fun matches(profile: SkillProfile): Boolean {
         val sourceMatches = when (sourceFilter) {
             "COMA" -> profile.sourceType == net.eenda.rvladdons.feature.cooldown.SkillSourceType.COMA_SET
@@ -261,48 +258,30 @@ class CooldownProfileScreen(private val parent: Screen?) : Screen(Text.literal("
         ).joinToString(" ")
         return query.isBlank() || value.contains(query.trim(), ignoreCase = true)
     }
-
     private fun sourceOptions(): List<String> = listOf("ALL", "COMA", "EQUIPPED", "MAIN", "OFFHAND", "ITEM")
-
     private fun sourceLabel(value: String): String = when (value) {
-        "MAIN_HAND_WEAPON" -> "MAIN WEAPON"
-        "OFF_HAND_WEAPON" -> "OFFHAND WEAPON"
-        "EQUIPPED_SET" -> "EQUIPPED SET"
-        "COMA_SET" -> "COMA SET"
-        else -> value
+        "MAIN_HAND_WEAPON" -> "MAIN WEAPON"; "OFF_HAND_WEAPON" -> "OFFHAND WEAPON"
+        "EQUIPPED_SET" -> "EQUIPPED SET"; "COMA_SET" -> "COMA SET"; else -> value
     }
-
     private fun typeLabel(value: String): String = if (value == "SET_BONUS") "SET BONUS" else value
-
     private fun triggerLabel(value: String): String = when (value) {
-        "LEFT_CLICK" -> "LMB"
-        "RIGHT_CLICK" -> "RMB"
-        "SHIFT_LEFT" -> "SHIFT + LMB"
-        "SHIFT_RIGHT" -> "SHIFT + RMB"
-        "JUMP_LEFT" -> "JUMP + LMB"
-        "JUMP_RIGHT" -> "JUMP + RMB"
-        "JUMP" -> "JUMP"
-        "SNEAK_HOLD" -> "SHIFT HOLD"
-        "DOUBLE_SNEAK" -> "DOUBLE SHIFT"
-        "PASSIVE_DAMAGED" -> "ON DAMAGE"
-        "PASSIVE" -> "PASSIVE"
-        "COMBO" -> "COMBO"
-        else -> value
+        "LEFT_CLICK" -> "LMB"; "RIGHT_CLICK" -> "RMB"; "SHIFT_LEFT" -> "SHIFT + LMB"; "SHIFT_RIGHT" -> "SHIFT + RMB"
+        "JUMP_LEFT" -> "JUMP + LMB"; "JUMP_RIGHT" -> "JUMP + RMB"; "JUMP" -> "JUMP"; "SNEAK_HOLD" -> "SHIFT HOLD"
+        "DOUBLE_SNEAK" -> "DOUBLE SHIFT"; "PASSIVE_DAMAGED" -> "ON DAMAGE"; "PASSIVE" -> "PASSIVE"; "COMBO" -> "COMBO"; else -> value
     }
-
     private fun trimSummary(value: String, maxWidth: Int): String {
         if (textRenderer.getWidth(value) <= maxWidth) return value
         var result = value
         while (result.isNotEmpty() && textRenderer.getWidth("$result...") > maxWidth) result = result.dropLast(1)
         return "$result..."
     }
-
     private fun drawScrollbar(context: DrawContext) {
         if (scrollState.maxOffset <= 0.0) return
-        val top = CONTENT_TOP; val bottom = contentBottom(); val height = bottom - top
-        val thumb = (height * height / (height + scrollState.maxOffset)).roundToInt().coerceAtLeast(12)
-        val y = top + ((height - thumb) * (scrollState.offset / scrollState.maxOffset)).roundToInt()
+        val top = CONTENT_TOP; val bottom = contentBottom(); val h = bottom - top
+        val thumb = (h * h / (h + scrollState.maxOffset)).roundToInt().coerceAtLeast(12)
+        val y = top + ((h - thumb) * (scrollState.offset / scrollState.maxOffset)).roundToInt()
         context.fill(width - 12, top, width - 8, bottom, 0x66333333)
         context.fill(width - 12, y, width - 8, y + thumb, 0xFFAAAAAA.toInt())
     }
 }
+

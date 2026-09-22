@@ -82,3 +82,4 @@ object CooldownHudRenderer {
         SkillTrigger.UNKNOWN -> "SKILL"
     }
 }
+

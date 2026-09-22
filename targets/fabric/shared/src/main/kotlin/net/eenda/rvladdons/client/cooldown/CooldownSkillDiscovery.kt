@@ -228,3 +228,4 @@ object CooldownSkillDiscovery {
             ?: "Equipped Set"
     }
 }
+
