@@ -107,6 +107,7 @@ object RvlAddonsClient : ClientModInitializer {
         }
 
         ClientPlayConnectionEvents.JOIN.register { _, _, client ->
+            LocalPartyController.onJoin(client)
             ComaSwapController.reset()
             CooldownController.clear()
             AutoReviveController.reset()
@@ -114,6 +115,7 @@ object RvlAddonsClient : ClientModInitializer {
         }
 
         ClientPlayConnectionEvents.DISCONNECT.register { _, client ->
+            LocalPartyController.onDisconnect(client)
             ComaSwapController.persistCurrentState(client)
             ComaSwapController.reset()
             CooldownController.clear()

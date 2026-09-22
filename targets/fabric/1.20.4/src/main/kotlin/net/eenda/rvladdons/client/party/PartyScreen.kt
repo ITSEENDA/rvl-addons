@@ -31,6 +31,7 @@ class PartyScreen(private val parent: Screen?) : Screen(Text.literal("Local Clon
     }
 
     override fun render(context: DrawContext, mouseX: Int, mouseY: Int, delta: Float) {
+        val minecraft = client ?: return
         super.render(context, mouseX, mouseY, delta)
         TakoScreenChrome.drawTitle(context, textRenderer, title, width, 16)
         TakoScreenChrome.drawPanel(context, PANEL_X, PANEL_Y, width - 48, height - 84, TakoTheme.PANEL)
@@ -40,10 +41,11 @@ class PartyScreen(private val parent: Screen?) : Screen(Text.literal("Local Clon
         LocalPartyController.clients().forEachIndexed { index, snapshot ->
             val rowY = PANEL_Y + 44 + index * ROW_HEIGHT
             val selected = snapshot.selected
-            val stateColor = if (snapshot.state == PartyPresenceState.IN_SERVER) TakoTheme.ACCENT else 0xFFCC8866.toInt()
+            val eligible = LocalPartyController.isEligible(snapshot, minecraft)
+            val stateColor = if (eligible) TakoTheme.ACCENT else 0xFFCC8866.toInt()
             context.fill(PANEL_X + 6, rowY, width - 54, rowY + ROW_HEIGHT - 2, if (selected) 0xCC25384A.toInt() else TakoTheme.PANEL_CARD)
-            context.drawTextWithShadow(textRenderer, Text.literal(if (selected) "[x]" else "[ ]"), PANEL_X + 12, rowY + 6, TakoTheme.TEXT_PRIMARY)
-            context.drawTextWithShadow(textRenderer, Text.literal(snapshot.name), PANEL_X + 42, rowY + 6, TakoTheme.TEXT_PRIMARY)
+            context.drawTextWithShadow(textRenderer, Text.literal(if (selected && eligible) "[x]" else "[ ]"), PANEL_X + 12, rowY + 6, if (eligible) TakoTheme.TEXT_PRIMARY else TakoTheme.TEXT_SECONDARY)
+            context.drawTextWithShadow(textRenderer, Text.literal(snapshot.name), PANEL_X + 42, rowY + 6, if (eligible) TakoTheme.TEXT_PRIMARY else TakoTheme.TEXT_SECONDARY)
             context.drawTextWithShadow(textRenderer, Text.literal(snapshot.state.name), width - 170, rowY + 6, stateColor)
             context.drawTextWithShadow(textRenderer, Text.literal(snapshot.serverKey.ifBlank { "No server" }), width - 92, rowY + 6, TakoTheme.TEXT_SECONDARY)
         }
@@ -58,6 +60,8 @@ class PartyScreen(private val parent: Screen?) : Screen(Text.literal("Local Clon
         if (button != 0 || mouseX < PANEL_X || mouseX > width - 24) return false
         val index = ((mouseY - (PANEL_Y + 44)) / ROW_HEIGHT).toInt()
         val snapshot = LocalPartyController.clients().getOrNull(index) ?: return false
+        val minecraft = client ?: return false
+        if (!LocalPartyController.isEligible(snapshot, minecraft)) return true
         LocalPartyController.toggleSelection(snapshot.clientId)
         return true
     }

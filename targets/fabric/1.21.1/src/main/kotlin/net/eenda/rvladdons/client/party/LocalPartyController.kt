@@ -27,7 +27,6 @@ object LocalPartyController {
     }
 
     fun tick(client: MinecraftClient) {
-        val currentTransport = transport ?: return
         val now = System.currentTimeMillis()
         if (now - lastLocalUpdate < 500L) return
         lastLocalUpdate = now
@@ -36,13 +35,29 @@ object LocalPartyController {
         } else {
             PartyPresenceState.MAIN_MENU
         }
+        publishPresence(client, state)
+    }
+
+    fun onJoin(client: MinecraftClient) {
+        publishPresence(client, PartyPresenceState.IN_SERVER)
+    }
+
+    fun onDisconnect(client: MinecraftClient) {
+        publishPresence(client, PartyPresenceState.DISCONNECTED)
+    }
+
+    fun isEligible(snapshot: PartyClientSnapshot, client: MinecraftClient): Boolean =
+        snapshot.state == PartyPresenceState.IN_SERVER && snapshot.serverKey == currentServerKey(client)
+
+    private fun publishPresence(client: MinecraftClient, state: PartyPresenceState) {
+        val currentTransport = transport ?: return
         val selected = registry.get(clientId)?.selected ?: false
         currentTransport.updateLocal(
             PartyClientSnapshot(
                 clientId = clientId,
                 name = client.player?.name?.string ?: "Client-${clientId.take(6)}",
                 state = state,
-                serverKey = client.currentServerEntry?.address?.trim()?.lowercase().orEmpty(),
+                serverKey = currentServerKey(client),
                 modVersion = "rvl-addons",
                 selected = selected
             )
@@ -63,12 +78,8 @@ object LocalPartyController {
     }
 
     fun selectAllEligible(client: MinecraftClient) {
-        val serverKey = client.currentServerEntry?.address?.trim()?.lowercase().orEmpty()
         registry.snapshot().forEach { snapshot ->
-            registry.updateSelection(
-                snapshot.clientId,
-                snapshot.state == PartyPresenceState.IN_SERVER && snapshot.serverKey == serverKey
-            )
+            registry.updateSelection(snapshot.clientId, isEligible(snapshot, client))
         }
     }
 
@@ -109,4 +120,7 @@ object LocalPartyController {
         }
         return generated
     }
+
+    private fun currentServerKey(client: MinecraftClient): String =
+        client.currentServerEntry?.address?.trim()?.lowercase().orEmpty()
 }
