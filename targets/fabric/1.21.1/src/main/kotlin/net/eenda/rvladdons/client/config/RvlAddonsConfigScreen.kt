@@ -1,6 +1,7 @@
 package net.eenda.rvladdons.client.config
 
 import net.eenda.rvladdons.client.coma.ComaSetManagerScreen
+import net.eenda.rvladdons.client.cooldown.CooldownProfileScreen
 import net.eenda.rvladdons.client.hud.HudLayoutEditorScreen
 import dev.isxander.yacl3.api.ButtonOption
 import dev.isxander.yacl3.api.ConfigCategory
@@ -54,6 +55,14 @@ object RvlAddonsConfigScreen {
                 Option.createBuilder<Boolean>()
                     .name(Text.literal("Show trace status"))
                     .binding(config.hudTraceVisible, { config.hudTraceVisible }, { config.hudTraceVisible = it })
+                    .controller { BooleanControllerBuilder.create(it).coloured(true).onOffFormatter() }
+                    .build()
+            )
+            .option(
+                Option.createBuilder<Boolean>()
+                    .name(Text.literal("Show cooldowns"))
+                    .description(OptionDescription.of(Text.literal("Show all active server-correlated cooldowns.")))
+                    .binding(config.hudCooldownVisible, { config.hudCooldownVisible }, { config.hudCooldownVisible = it })
                     .controller { BooleanControllerBuilder.create(it).coloured(true).onOffFormatter() }
                     .build()
             )
@@ -132,6 +141,21 @@ object RvlAddonsConfigScreen {
         val featuresCategory = ConfigCategory.createBuilder()
             .name(Text.literal("Features"))
             .group(comaGroup)
+            .group(
+                OptionGroup.createBuilder()
+                    .name(Text.literal("Cooldown"))
+                    .description(OptionDescription.of(Text.literal("Manage discovered skill labels and tracking overrides.")))
+                    .option(
+                        ButtonOption.createBuilder()
+                            .name(Text.literal("Manage skill profiles"))
+                            .text(Text.literal("Open"))
+                            .action { screen ->
+                                MinecraftClient.getInstance().setScreen(CooldownProfileScreen(screen))
+                            }
+                            .build()
+                    )
+                    .build()
+            )
             .build()
 
         return YetAnotherConfigLib.createBuilder()

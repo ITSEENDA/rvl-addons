@@ -18,6 +18,7 @@ public abstract class ClientConnectionTraceMixin {
         at = @At("HEAD")
     )
     private void rvladdons$traceOutbound(Packet<?> packet, PacketCallbacks callbacks, boolean flush, CallbackInfo info) {
+        RvlAddonsTraceBridge.inspectOutgoingPacket(packet);
         RvlAddonsTrace.logPacket("out", packet);
     }
 

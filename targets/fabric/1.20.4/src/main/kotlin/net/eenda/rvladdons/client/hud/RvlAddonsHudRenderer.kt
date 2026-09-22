@@ -2,7 +2,9 @@ package net.eenda.rvladdons.client.hud
 
 import net.eenda.rvladdons.RvlAddonsClient
 import net.eenda.rvladdons.client.coma.ComaSwapController
-import net.eenda.rvladdons.client.ui.RvlToastManager
+import net.eenda.rvladdons.client.cooldown.CooldownController
+import net.eenda.rvladdons.client.cooldown.CooldownHudRenderer
+import dev.tako.libs.client.ui.feedback.TakoToastManager
 import net.eenda.rvladdons.core.HudComponent
 import net.eenda.rvladdons.core.HudLayout
 import net.eenda.rvladdons.core.HudLayoutMath
@@ -16,8 +18,8 @@ import net.minecraft.text.Text
 import kotlin.math.roundToInt
 
 object RvlAddonsHudRenderer {
-    private const val COOLDOWN_WIDTH = 140
-    private const val COOLDOWN_HEIGHT = 25
+    private const val COOLDOWN_WIDTH = 260
+    private const val COOLDOWN_HEIGHT = 34
     private const val COMA_ITEM_SIZE = 18
     private const val COMA_ITEM_GAP = 2
 
@@ -26,7 +28,7 @@ object RvlAddonsHudRenderer {
             val client = MinecraftClient.getInstance()
             val config = RvlAddonsConfigStore.config
             if (client.world == null) return@register
-            RvlToastManager.render(context, client)
+            TakoToastManager.render(context, client)
 
             if (config.hudStatusVisible && RvlAddonsClient.isGameplayServerActive()) {
                 drawComponent(context, client, HudComponent.STATUS)
@@ -34,6 +36,10 @@ object RvlAddonsHudRenderer {
 
             if (config.hudTraceVisible) {
                 drawComponent(context, client, HudComponent.TRACE)
+            }
+
+            if (config.hudCooldownVisible && RvlAddonsClient.isGameplayServerActive() && CooldownController.hasActive()) {
+                drawComponent(context, client, HudComponent.COOLDOWN)
             }
 
             if (config.hudComaVisible && RvlAddonsClient.isGameplayServerActive()) {
@@ -91,7 +97,13 @@ object RvlAddonsHudRenderer {
                 val color = if (RvlAddonsTrace.isEnabled()) 0x55FF55 else 0xFFAA55
                 context.drawTextWithShadow(client.textRenderer, text, 0, 0, color)
             }
-            HudComponent.COOLDOWN -> drawCooldownPreview(context, client)
+            HudComponent.COOLDOWN -> {
+                if (CooldownController.hasActive()) {
+                    CooldownHudRenderer.render(context, client)
+                } else {
+                    drawCooldownPreview(context, client)
+                }
+            }
             HudComponent.COMA -> {
                 context.drawTextWithShadow(client.textRenderer, Text.literal(ComaSwapController.hudText()), 0, 0, 0xFFAA55)
                 val stacks = ComaSwapController.hudStacks(client)
@@ -111,15 +123,20 @@ object RvlAddonsHudRenderer {
 
     private fun drawCooldownPreview(context: DrawContext, client: MinecraftClient) {
         val progress = 0.8f
-        context.fill(0, 0, COOLDOWN_WIDTH, 8, 0xAA202020.toInt())
-        context.fill(0, 0, (COOLDOWN_WIDTH * progress).roundToInt(), 8, 0xFF55AAFF.toInt())
-        context.drawTextWithShadow(client.textRenderer, Text.literal("COOLDOWN 0.6s"), 0, 10, 0xFFFFFF)
+        context.fill(0, 0, COOLDOWN_WIDTH, COOLDOWN_HEIGHT, 0xAA101010.toInt())
+        context.fill(0, 0, (COOLDOWN_WIDTH * progress).roundToInt(), 3, 0xFF55AAFF.toInt())
+        context.drawTextWithShadow(client.textRenderer, Text.literal("Crimson Katana"), 6, 7, 0xFFFFFF)
+        context.drawTextWithShadow(client.textRenderer, Text.literal("[RMB]  0.6s"), 6, 20, 0xAAAAAA)
     }
 
     private fun baseSize(client: MinecraftClient, component: HudComponent): Pair<Int, Int> = when (component) {
         HudComponent.STATUS -> client.textRenderer.getWidth("RVL: ACTIVE") to client.textRenderer.fontHeight
         HudComponent.TRACE -> client.textRenderer.getWidth("TRACE: ON") to client.textRenderer.fontHeight
-        HudComponent.COOLDOWN -> COOLDOWN_WIDTH to COOLDOWN_HEIGHT
+        HudComponent.COOLDOWN -> if (CooldownController.hasActive()) {
+            CooldownHudRenderer.panelSize(client)
+        } else {
+            COOLDOWN_WIDTH to COOLDOWN_HEIGHT
+        }
         HudComponent.COMA -> {
             val stacks = ComaSwapController.hudStacks(client)
             val itemWidth = if (stacks.isEmpty()) 0 else
