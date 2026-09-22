@@ -1,8 +1,13 @@
 package net.eenda.rvladdons.client.hud
 
+import dev.tako.libs.client.ui.editor.TakoEditCommand
+import dev.tako.libs.client.ui.editor.TakoUndoRedoHistory
+import dev.tako.libs.client.ui.widget.TakoButtonIcon
+import dev.tako.libs.client.ui.widget.TakoIconButton
 import net.eenda.rvladdons.core.HudAnchor
 import net.eenda.rvladdons.core.HudComponent
 import net.eenda.rvladdons.core.HudLayout
+import net.eenda.rvladdons.core.HudLayoutMath
 import net.eenda.rvladdons.core.HudRect
 import net.eenda.rvladdons.core.RvlAddonsConfigStore
 import net.minecraft.client.MinecraftClient
@@ -10,6 +15,7 @@ import net.minecraft.client.gui.DrawContext
 import net.minecraft.client.gui.screen.Screen
 import net.minecraft.client.gui.widget.ButtonWidget
 import net.minecraft.text.Text
+import org.lwjgl.glfw.GLFW
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -39,35 +45,56 @@ class HudLayoutEditorScreen(private val parent: Screen?) : Screen(Text.literal("
     private var resizeStartScale = 1f
     private var resizeBaseWidth = 0
     private var resizeBaseHeight = 0
+    private val history = TakoUndoRedoHistory()
+    private var undoButton: TakoIconButton? = null
+    private var redoButton: TakoIconButton? = null
+    private var editComponent: HudComponent? = null
+    private var editStartLayout: HudLayout? = null
+    private val anchorButtons = linkedMapOf<HudAnchor, ButtonWidget>()
 
     override fun init() {
-        addDrawableChild(ButtonWidget.builder(Text.literal("-")) {
+        addDrawableChild(TakoIconButton(TakoButtonIcon.ZOOM_OUT, Text.literal("Zoom out"), width - 78, 92) {
             adjustScale(-0.05f)
-        }.dimensions(width - 78, 92, 24, 20).build())
-
-        addDrawableChild(ButtonWidget.builder(Text.literal("+")) {
+        })
+        addDrawableChild(TakoIconButton(TakoButtonIcon.ZOOM_IN, Text.literal("Zoom in"), width - 48, 92) {
             adjustScale(0.05f)
-        }.dimensions(width - 48, 92, 24, 20).build())
+        })
+
+        val undo = TakoIconButton(TakoButtonIcon.UNDO, Text.literal("Undo"), width - 210, 126) { history.undo() }
+        val redo = TakoIconButton(TakoButtonIcon.REDO, Text.literal("Redo"), width - 184, 126) { history.redo() }
+        undoButton = undo
+        redoButton = redo
+        addDrawableChild(undo)
+        addDrawableChild(redo)
+
+        HudAnchor.entries.forEachIndexed { index, anchor ->
+            val button = ButtonWidget.builder(Text.literal(anchorLabel(anchor))) {
+                setAnchor(anchor)
+            }.dimensions(width - 210 + (index % 3) * 66, 164 + (index / 3) * 22, 62, 20).build()
+            anchorButtons[anchor] = button
+            addDrawableChild(button)
+        }
 
         addDrawableChild(ButtonWidget.builder(Text.literal("Save")) {
             RvlAddonsConfigStore.save()
             client?.setScreen(parent)
-        }.dimensions(width - 260, height - 32, 70, 20).build())
+        }.dimensions(width - 150, height - 32, 70, 20).build())
 
-        addDrawableChild(ButtonWidget.builder(Text.literal("Reset selected")) {
+        addDrawableChild(TakoIconButton(TakoButtonIcon.RESET, Text.literal("Reset selected"), width - 72, height - 32) {
             reset(selectedComponent)
-        }.dimensions(width - 185, height - 32, 90, 20).build())
+        })
 
-        addDrawableChild(ButtonWidget.builder(Text.literal("Reset all")) {
-            reset(HudComponent.STATUS)
-            reset(HudComponent.TRACE)
-            reset(HudComponent.COOLDOWN)
-            reset(HudComponent.COMA)
-        }.dimensions(width - 90, height - 32, 78, 20).build())
+        addDrawableChild(TakoIconButton(TakoButtonIcon.RESET_ALL, Text.literal("Reset all"), width - 42, height - 32) {
+            resetAll()
+        })
     }
 
     override fun render(context: DrawContext, mouseX: Int, mouseY: Int, delta: Float) {
         val minecraft = client ?: return
+        undoButton?.active = history.canUndo
+        redoButton?.active = history.canRedo
+        val selectedAnchor = layoutFor(selectedComponent).anchor
+        anchorButtons.forEach { (anchor, button) -> button.active = anchor != selectedAnchor }
         super.render(context, mouseX, mouseY, delta)
         context.drawCenteredTextWithShadow(textRenderer, title, width / 2, 20, 0xFFFFFF)
 
@@ -85,6 +112,8 @@ class HudLayoutEditorScreen(private val parent: Screen?) : Screen(Text.literal("
         val selectedRect = componentRect(selectedComponent)
         val selectedHandle = resizeHandleAt(selectedRect, mouseX, mouseY)
         if (selectedHandle != null) {
+            editComponent = selectedComponent
+            editStartLayout = layoutFor(selectedComponent).copy()
             startResize(selectedHandle, selectedRect)
             return true
         }
@@ -93,6 +122,8 @@ class HudLayoutEditorScreen(private val parent: Screen?) : Screen(Text.literal("
             .firstOrNull { contains(componentRect(it), mouseX, mouseY) }
         if (hit != null) {
             selectedComponent = hit
+            editComponent = hit
+            editStartLayout = layoutFor(hit).copy()
             val rect = componentRect(hit)
             dragOffsetX = mouseX.toInt() - rect.x
             dragOffsetY = mouseY.toInt() - rect.y
@@ -117,17 +148,34 @@ class HudLayoutEditorScreen(private val parent: Screen?) : Screen(Text.literal("
             val rect = componentRect(selectedComponent)
             val proposedX = mouseX.toInt() - dragOffsetX
             val proposedY = mouseY.toInt() - dragOffsetY
-            layout.offsetX = snapPosition(proposedX, rect.width, width)
-            layout.offsetY = snapPosition(proposedY, rect.height, height)
+            val snappedX = snapPosition(proposedX, rect.width, width)
+            val snappedY = snapPosition(proposedY, rect.height, height)
+            layout.offsetX = HudLayoutMath.offsetXFor(layout.anchor, snappedX, width, rect.width)
+            layout.offsetY = HudLayoutMath.offsetYFor(layout.anchor, snappedY, height, rect.height)
             return true
         }
         return super.mouseDragged(mouseX, mouseY, button, deltaX, deltaY)
     }
 
     override fun mouseReleased(mouseX: Double, mouseY: Double, button: Int): Boolean {
+        commitInteraction()
         dragging = false
         resizeHandle = null
         return super.mouseReleased(mouseX, mouseY, button)
+    }
+
+    override fun keyPressed(keyCode: Int, scanCode: Int, modifiers: Int): Boolean {
+        if (hasControlDown()) {
+            if (keyCode == GLFW.GLFW_KEY_Z) {
+                if (hasShiftDown()) history.redo() else history.undo()
+                return true
+            }
+            if (keyCode == GLFW.GLFW_KEY_Y) {
+                history.redo()
+                return true
+            }
+        }
+        return super.keyPressed(keyCode, scanCode, modifiers)
     }
 
     override fun close() {
@@ -166,7 +214,7 @@ class HudLayoutEditorScreen(private val parent: Screen?) : Screen(Text.literal("
         val panelX = width - 210
         val panelY = 44
         val panelWidth = 198
-        context.fill(panelX, panelY, panelX + panelWidth, panelY + 76, 0xCC101010.toInt())
+        context.fill(panelX, panelY, panelX + panelWidth, panelY + 190, 0xCC101010.toInt())
         context.drawTextWithShadow(textRenderer, Text.literal(componentName(selectedComponent)), panelX + 8, panelY + 8, 0xFFFFFF)
         context.drawTextWithShadow(
             textRenderer,
@@ -190,6 +238,7 @@ class HudLayoutEditorScreen(private val parent: Screen?) : Screen(Text.literal("
             0x999999
         )
         context.drawTextWithShadow(textRenderer, Text.literal("- / +"), panelX + 132, panelY + 78, 0x999999)
+        context.drawTextWithShadow(textRenderer, Text.literal("Select anchor"), panelX + 8, panelY + 106, 0x999999)
     }
 
     private fun componentRect(component: HudComponent): HudRect {
@@ -230,9 +279,6 @@ class HudLayoutEditorScreen(private val parent: Screen?) : Screen(Text.literal("
 
     private fun startResize(handle: ResizeHandle, rect: HudRect) {
         val layout = layoutFor(selectedComponent)
-        layout.anchor = HudAnchor.TOP_LEFT
-        layout.offsetX = rect.x
-        layout.offsetY = rect.y
         resizeHandle = handle
         resizeStartRect = componentRect(selectedComponent)
         resizeStartScale = layout.scale
@@ -270,8 +316,10 @@ class HudLayoutEditorScreen(private val parent: Screen?) : Screen(Text.literal("
         }
 
         layout.scale = scale
-        layout.offsetX = snapPosition(newX, componentWidth, width)
-        layout.offsetY = snapPosition(newY, componentHeight, height)
+        val snappedX = snapPosition(newX, componentWidth, width)
+        val snappedY = snapPosition(newY, componentHeight, height)
+        layout.offsetX = HudLayoutMath.offsetXFor(layout.anchor, snappedX, width, componentWidth)
+        layout.offsetY = HudLayoutMath.offsetYFor(layout.anchor, snappedY, height, componentHeight)
     }
 
     private fun snapPosition(value: Int, componentSize: Int, screenSize: Int): Int {
@@ -290,20 +338,104 @@ class HudLayoutEditorScreen(private val parent: Screen?) : Screen(Text.literal("
     }
 
     private fun adjustScale(delta: Float) {
-        val layout = layoutFor(selectedComponent)
-        layout.scale = (layout.scale + delta).coerceIn(MIN_SCALE, MAX_SCALE)
+        editLayouts(listOf(selectedComponent)) { layout ->
+            layout.scale = (layout.scale + delta).coerceIn(MIN_SCALE, MAX_SCALE)
+        }
+    }
+
+    private fun setAnchor(anchor: HudAnchor) {
+        val component = selectedComponent
+        val rect = componentRect(component)
+        editLayouts(listOf(component)) { layout ->
+            layout.anchor = anchor
+            layout.offsetX = HudLayoutMath.offsetXFor(anchor, rect.x, width, rect.width)
+            layout.offsetY = HudLayoutMath.offsetYFor(anchor, rect.y, height, rect.height)
+        }
+    }
+
+    private fun anchorLabel(anchor: HudAnchor): String = when (anchor) {
+        HudAnchor.TOP_LEFT -> "TL"
+        HudAnchor.TOP_CENTER -> "TC"
+        HudAnchor.TOP_RIGHT -> "TR"
+        HudAnchor.CENTER_LEFT -> "CL"
+        HudAnchor.CENTER -> "C"
+        HudAnchor.CENTER_RIGHT -> "CR"
+        HudAnchor.BOTTOM_LEFT -> "BL"
+        HudAnchor.BOTTOM_CENTER -> "BC"
+        HudAnchor.BOTTOM_RIGHT -> "BR"
     }
 
     private fun reset(component: HudComponent) {
-        val layout = layoutFor(component)
-        layout.anchor = HudAnchor.TOP_LEFT
-        layout.offsetX = 8
-        layout.offsetY = when (component) {
-            HudComponent.STATUS -> 8
-            HudComponent.TRACE -> 26
-            HudComponent.COOLDOWN -> 46
-            HudComponent.COMA -> 70
+        editLayouts(listOf(component)) { layout ->
+            layout.anchor = HudAnchor.TOP_LEFT
+            layout.offsetX = 8
+            layout.offsetY = defaultOffsetY(component)
+            layout.scale = 1f
         }
-        layout.scale = 1f
+    }
+
+    private fun resetAll() {
+        editLayouts(HudComponent.entries) { component, layout ->
+            layout.anchor = HudAnchor.TOP_LEFT
+            layout.offsetX = 8
+            layout.offsetY = defaultOffsetY(component)
+            layout.scale = 1f
+        }
+    }
+
+    private fun defaultOffsetY(component: HudComponent): Int = when (component) {
+        HudComponent.STATUS -> 8
+        HudComponent.TRACE -> 26
+        HudComponent.COOLDOWN -> 46
+        HudComponent.COMA -> 70
+    }
+
+    private fun editLayouts(
+        components: Iterable<HudComponent>,
+        change: (HudLayout) -> Unit
+    ) = editLayouts(components) { _, layout -> change(layout) }
+
+    private fun editLayouts(
+        components: Iterable<HudComponent>,
+        change: (HudComponent, HudLayout) -> Unit
+    ) {
+        val componentList = components.toList()
+        val before = componentList.associateWith { layoutFor(it).copy() }
+        componentList.forEach { change(it, layoutFor(it)) }
+        val after = componentList.associateWith { layoutFor(it).copy() }
+        recordLayoutChange(before, after)
+    }
+
+    private fun commitInteraction() {
+        val component = editComponent ?: return
+        val before = editStartLayout ?: return
+        recordLayoutChange(
+            mapOf(component to before),
+            mapOf(component to layoutFor(component).copy())
+        )
+        editComponent = null
+        editStartLayout = null
+    }
+
+    private fun recordLayoutChange(
+        before: Map<HudComponent, HudLayout>,
+        after: Map<HudComponent, HudLayout>
+    ) {
+        if (before == after) return
+        applyLayouts(before)
+        history.execute(TakoEditCommand(
+            redoAction = { applyLayouts(after) },
+            undoAction = { applyLayouts(before) }
+        ))
+    }
+
+    private fun applyLayouts(snapshot: Map<HudComponent, HudLayout>) {
+        snapshot.forEach { (component, source) ->
+            val target = layoutFor(component)
+            target.anchor = source.anchor
+            target.offsetX = source.offsetX
+            target.offsetY = source.offsetY
+            target.scale = source.scale
+        }
     }
 }

@@ -20,6 +20,7 @@ def yarnMappings = targetValue('yarn_mappings')
 def loaderVersion = targetValue('loader_version')
 def fabricVersion = targetValue('fabric_version')
 def fabricKotlinVersion = targetValue('fabric_kotlin_version')
+def takoLibVersion = targetValue('tako_lib_version')
 def yaclVersion = targetValue('yacl_version')
 def yaclMinVersion = targetValue('yacl_min_version')
 def modMenuVersion = targetValue('modmenu_version')
@@ -33,6 +34,7 @@ base {
 }
 
 repositories {
+	mavenLocal()
 	mavenCentral()
 	maven { url = 'https://maven.terraformersmc.com/releases/' }
 	maven { url = 'https://maven.isxander.dev/releases/' }
@@ -57,6 +59,8 @@ dependencies {
 
 	implementation project(':common')
 	include project(':common')
+	def takoLibDependency = modImplementation("dev.tako:tako-libs-fabric-${minecraftVersion}:${takoLibVersion}")
+	include takoLibDependency
 }
 
 processResources {
