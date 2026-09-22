@@ -10,6 +10,7 @@ import net.eenda.rvladdons.client.coma.ComaSwapController
 import net.eenda.rvladdons.client.config.RvlAddonsConfigScreen
 import net.eenda.rvladdons.client.cooldown.CooldownController
 import net.eenda.rvladdons.client.hud.RvlAddonsHudRenderer
+import net.eenda.rvladdons.client.revive.AutoReviveController
 import net.fabricmc.api.ClientModInitializer
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper
@@ -30,6 +31,7 @@ object RvlAddonsClient : ClientModInitializer {
     private lateinit var modToggleKey: KeyBinding
     private lateinit var settingsKey: KeyBinding
     private lateinit var comaSwapKey: KeyBinding
+    private lateinit var autoReviveKey: KeyBinding
 
     override fun onInitializeClient() {
         RvlAddonsConfigStore.load(FabricLoader.getInstance().configDir.resolve("rvl-addons.properties"))
@@ -70,6 +72,14 @@ object RvlAddonsClient : ClientModInitializer {
                 "category.rvl-addons"
             )
         )
+        autoReviveKey = KeyBindingHelper.registerKeyBinding(
+            KeyBinding(
+                "key.rvl-addons.toggle_auto_revive",
+                InputUtil.Type.KEYSYM,
+                GLFW.GLFW_KEY_F10,
+                "category.rvl-addons"
+            )
+        )
 
         ClientSendMessageEvents.CHAT.register { message ->
             RvlAddonsTrace.log("chat-out", message)
@@ -82,6 +92,7 @@ object RvlAddonsClient : ClientModInitializer {
         ClientPlayConnectionEvents.JOIN.register { _, _, client ->
             ComaSwapController.reset()
             CooldownController.clear()
+            AutoReviveController.reset()
             ComaSwapController.restorePersistedState(client)
         }
 
@@ -89,6 +100,7 @@ object RvlAddonsClient : ClientModInitializer {
             ComaSwapController.persistCurrentState(client)
             ComaSwapController.reset()
             CooldownController.clear()
+            AutoReviveController.reset()
             updateRvlServerState(false)
         }
 
@@ -105,7 +117,11 @@ object RvlAddonsClient : ClientModInitializer {
             while (comaSwapKey.wasPressed()) {
                 ComaSwapController.requestSwap(client)
             }
+            while (autoReviveKey.wasPressed()) {
+                toggleAutoRevive()
+            }
             CooldownController.observeInputTransitions(client)
+            AutoReviveController.tick(client)
             ComaSwapController.tick(client)
         }
     }
@@ -140,6 +156,17 @@ object RvlAddonsClient : ClientModInitializer {
         RvlAddonsTrace.log("mod-state", "enabled=$enabled")
         MinecraftClient.getInstance().inGameHud.setOverlayMessage(
             Text.literal(if (enabled) "RVL Addons: ENABLED" else "RVL Addons: DISABLED"),
+            false
+        )
+    }
+
+    private fun toggleAutoRevive() {
+        val config = RvlAddonsConfigStore.config
+        config.autoReviveEnabled = !config.autoReviveEnabled
+        RvlAddonsConfigStore.save()
+        AutoReviveController.resetAutoOnly()
+        MinecraftClient.getInstance().inGameHud.setOverlayMessage(
+            Text.literal(if (config.autoReviveEnabled) "Fast revive: ENABLED" else "Fast revive: DISABLED"),
             false
         )
     }

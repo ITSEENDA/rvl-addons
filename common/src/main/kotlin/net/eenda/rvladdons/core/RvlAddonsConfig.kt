@@ -2,6 +2,7 @@ package net.eenda.rvladdons.core
 
 import net.eenda.rvladdons.feature.coma.ComaSetConfig
 import net.eenda.rvladdons.feature.coma.ComaTimingConfig
+import net.eenda.rvladdons.feature.revive.AutoReviveMode
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.Properties
@@ -16,6 +17,12 @@ data class RvlAddonsConfig(
     var hudCooldown: HudLayout = HudLayout(offsetY = 46),
     var hudComaVisible: Boolean = true,
     var hudComa: HudLayout = HudLayout(offsetY = 70),
+    var autoReviveEnabled: Boolean = false,
+    var autoReviveMode: AutoReviveMode = AutoReviveMode.FAST,
+    var autoReviveRespawnDelayMs: Int = 0,
+    var autoReviveBackDelayMs: Int = 0,
+    var rbdSoundEnabled: Boolean = true,
+    var autoReviveSoundVolume: Float = 1f,
     var comaSwapServerSync: Boolean = true,
     var comaTiming: ComaTimingConfig = ComaTimingConfig(),
     var comaSets: MutableList<ComaSetConfig> = mutableListOf(ComaSetConfig())
@@ -84,6 +91,20 @@ object RvlAddonsConfigStore {
                 offsetY = properties.getProperty("hud.coma.offsetY")?.toIntOrNull() ?: 70,
                 scale = properties.getProperty("hud.coma.scale")?.toFloatOrNull()?.coerceIn(0.5f, 2f) ?: 1f
             ),
+            autoReviveEnabled = properties.getProperty("revive.enabled")?.toBooleanStrictOrNull()
+                ?: properties.getProperty("revive.mode")?.let { it != "NONE" }
+                ?: false,
+            autoReviveMode = when (properties.getProperty("revive.mode")) {
+                "INSTANT", "INSTANT_REVIVE" -> AutoReviveMode.INSTANT
+                "FAST", "RBD" -> AutoReviveMode.FAST
+                else -> AutoReviveMode.FAST
+            },
+            autoReviveRespawnDelayMs = properties.getProperty("revive.respawn.delayMs")
+                ?.toIntOrNull()?.coerceIn(0, 5000) ?: 0,
+            autoReviveBackDelayMs = properties.getProperty("revive.back.delayMs")
+                ?.toIntOrNull()?.coerceIn(0, 5000) ?: 0,
+            rbdSoundEnabled = properties.getProperty("revive.sound.enabled")?.toBooleanStrictOrNull() ?: true,
+            autoReviveSoundVolume = properties.getProperty("revive.sound.volume")?.toFloatOrNull()?.coerceIn(0f, 1f) ?: 1f,
             comaSwapServerSync = properties.getProperty("coma.swap.serverSync")?.toBooleanStrictOrNull() ?: true,
             comaTiming = ComaTimingConfig(
                 openMs = properties.getProperty("coma.timing.openMs")?.toIntOrNull()?.coerceIn(0, 5000) ?: 50,
@@ -122,6 +143,12 @@ object RvlAddonsConfigStore {
         properties["hud.coma.offsetX"] = config.hudComa.offsetX.toString()
         properties["hud.coma.offsetY"] = config.hudComa.offsetY.toString()
         properties["hud.coma.scale"] = config.hudComa.scale.toString()
+        properties["revive.enabled"] = config.autoReviveEnabled.toString()
+        properties["revive.mode"] = config.autoReviveMode.name
+        properties["revive.respawn.delayMs"] = config.autoReviveRespawnDelayMs.toString()
+        properties["revive.back.delayMs"] = config.autoReviveBackDelayMs.toString()
+        properties["revive.sound.enabled"] = config.rbdSoundEnabled.toString()
+        properties["revive.sound.volume"] = config.autoReviveSoundVolume.toString()
         properties["coma.swap.serverSync"] = config.comaSwapServerSync.toString()
         properties["coma.timing.openMs"] = config.comaTiming.openMs.toString()
         properties["coma.timing.clearIntervalMs"] = config.comaTiming.clearIntervalMs.toString()
