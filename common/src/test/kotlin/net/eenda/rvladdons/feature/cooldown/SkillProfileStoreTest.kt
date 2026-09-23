@@ -2,6 +2,7 @@ package net.eenda.rvladdons.feature.cooldown
 
 import java.nio.file.Files
 import java.util.Properties
+import java.util.concurrent.Executors
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -21,6 +22,34 @@ class SkillProfileStoreTest {
             assertEquals(1, SkillProfileStore.all().size)
             assertEquals(SkillSourceType.COMA_SET, SkillProfileStore.all().single().sourceType)
         } finally {
+            Files.deleteIfExists(path)
+        }
+    }
+
+    @Test
+    fun serializesConcurrentProfileRegistration() {
+        val path = Files.createTempFile("rvl-skill-profiles-concurrent", ".properties")
+        val executor = Executors.newFixedThreadPool(8)
+        try {
+            SkillProfileStore.load(path)
+            val futures = (0 until 8).map { worker ->
+                executor.submit {
+                    repeat(50) { index ->
+                        SkillProfileStore.register(
+                            skillKey = "skill-$worker-$index",
+                            label = "Skill $worker $index",
+                            setId = null,
+                            trigger = SkillTrigger.RIGHT_CLICK,
+                            sourceFingerprint = "fingerprint-$worker-$index",
+                            cooldownHintMs = 1_000L
+                        )
+                    }
+                }
+            }
+            futures.forEach { it.get() }
+            assertEquals(400, SkillProfileStore.all().size)
+        } finally {
+            executor.shutdownNow()
             Files.deleteIfExists(path)
         }
     }

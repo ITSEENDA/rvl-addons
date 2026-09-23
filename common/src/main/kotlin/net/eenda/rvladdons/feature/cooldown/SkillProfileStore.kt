@@ -23,6 +23,7 @@ object SkillProfileStore {
     private val profiles = LinkedHashMap<String, SkillProfile>()
     private var path: Path? = null
 
+    @Synchronized
     fun load(profilePath: Path) {
         path = profilePath
         profiles.clear()
@@ -55,6 +56,7 @@ object SkillProfileStore {
         if (deduplicateInternal()) save()
     }
 
+    @Synchronized
     fun register(descriptor: SkillDescriptor, sourceType: SkillSourceType = SkillSourceType.ITEM): SkillProfile = register(
         skillKey = descriptor.skillKey,
         label = descriptor.displayName,
@@ -67,6 +69,7 @@ object SkillProfileStore {
         setBonusLevel = descriptor.setBonusLevel
     )
 
+    @Synchronized
     fun register(
         skillKey: String,
         label: String,
@@ -119,26 +122,33 @@ object SkillProfileStore {
         }
     }
 
+    @Synchronized
     fun all(): List<SkillProfile> = profiles.values.toList()
 
+    @Synchronized
     fun find(skillKey: String): SkillProfile? = profiles[skillKey]
 
+    @Synchronized
     fun setLabel(skillKey: String, label: String) {
         profiles[skillKey]?.label = label.trim().ifBlank { profiles[skillKey]?.label ?: skillKey }
     }
 
+    @Synchronized
     fun setEnabled(skillKey: String, enabled: Boolean) {
         profiles[skillKey]?.enabled = enabled
     }
 
+    @Synchronized
     fun remove(skillKey: String): Boolean = profiles.remove(skillKey) != null
 
+    @Synchronized
     fun removeAndSave(skillKey: String): Boolean {
         val removed = remove(skillKey)
         if (removed) save()
         return removed
     }
 
+    @Synchronized
     fun removeSetProfilesExcept(setId: String, keepKeys: Set<String>) {
         val changed = profiles.entries.removeIf { (key, profile) ->
             profile.setId == setId && profile.sourceType != SkillSourceType.ITEM && key !in keepKeys
@@ -146,6 +156,7 @@ object SkillProfileStore {
         if (changed) save()
     }
 
+    @Synchronized
     fun removeLegacyItemProfiles(fingerprints: Set<String>) {
         if (fingerprints.isEmpty()) return
         val changed = profiles.entries.removeIf { (key, profile) ->
@@ -155,6 +166,7 @@ object SkillProfileStore {
     }
 
     /** Removes armor ITEM profiles created before armor was represented by a set profile. */
+    @Synchronized
     fun removeLegacyArmorItemProfiles(itemNames: Set<String>) {
         val normalizedNames = itemNames.map(::normalize).filter(String::isNotBlank).toSet()
         if (normalizedNames.isEmpty()) return
@@ -168,6 +180,7 @@ object SkillProfileStore {
     }
 
     /** Removes stale equipped-set profiles when the same set is now recognized as a configured coma set. */
+    @Synchronized
     fun removeLegacyEquippedSetProfiles(setIds: Set<String>) {
         val normalizedIds = setIds.map(::normalize).filter(String::isNotBlank).toSet()
         if (normalizedIds.isEmpty()) return
@@ -178,10 +191,12 @@ object SkillProfileStore {
         if (changed) save()
     }
 
+    @Synchronized
     fun deduplicate() {
         if (deduplicateInternal()) save()
     }
 
+    @Synchronized
     fun save() {
         val profilePath = path ?: return
         Files.createDirectories(profilePath.parent)
