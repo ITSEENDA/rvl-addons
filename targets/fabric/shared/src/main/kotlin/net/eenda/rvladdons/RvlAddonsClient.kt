@@ -33,9 +33,14 @@ object RvlAddonsClient : ClientModInitializer {
     private lateinit var comaSwapKey: KeyBinding
 
     override fun onInitializeClient() {
-        RvlAddonsConfigStore.load(FabricLoader.getInstance().configDir.resolve("rvl-addons.properties"))
-        ComaStateStore.load(FabricLoader.getInstance().configDir.resolve("rvl-addons-coma-state.properties"))
-        SkillProfileStore.load(FabricLoader.getInstance().configDir.resolve("rvl-addons-skill-profiles.properties"))
+        val configDir = FabricLoader.getInstance().configDir
+        RvlAddonsConfigStore.load(configDir.resolve("rvl-addons.properties"))
+        ComaStateStore.load(configDir.resolve("rvl-addons-coma-state.properties"))
+        val session = MinecraftClient.getInstance().session
+        SkillProfileStore.load(
+            SkillProfileStore.accountProfilePath(configDir, session.uuidOrNull, session.username),
+            SkillProfileStore.legacyProfilePath(configDir)
+        )
         ModEnabledState.set(RvlAddonsConfigStore.config.enabled)
         RvlAddonsHudRenderer.register()
         AutoReviveController.registerKeyBinding()

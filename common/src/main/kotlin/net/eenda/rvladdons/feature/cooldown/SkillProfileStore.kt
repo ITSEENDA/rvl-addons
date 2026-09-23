@@ -3,6 +3,8 @@ package net.eenda.rvladdons.feature.cooldown
 import net.eenda.rvladdons.core.RvlTextMatcher
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardCopyOption
+import java.util.UUID
 import java.util.Properties
 import java.util.Locale
 
@@ -20,16 +22,23 @@ data class SkillProfile(
 )
 
 object SkillProfileStore {
+    private const val PROFILE_DIRECTORY = "rvl-addons-skill-profiles"
+    private const val LEGACY_PROFILE_FILE = "rvl-addons-skill-profiles.properties"
+
     private val profiles = LinkedHashMap<String, SkillProfile>()
     private var path: Path? = null
 
     @Synchronized
-    fun load(profilePath: Path) {
+    fun load(profilePath: Path, legacyPath: Path? = null) {
         path = profilePath
         profiles.clear()
-        if (!Files.exists(profilePath)) return
+        val sourcePath = when {
+            Files.exists(profilePath) -> profilePath
+            legacyPath != null && Files.exists(legacyPath) -> legacyPath
+            else -> return
+        }
         val properties = Properties()
-        Files.newInputStream(profilePath).use(properties::load)
+        Files.newInputStream(sourcePath).use(properties::load)
         val count = properties.getProperty("profile.count")?.toIntOrNull() ?: 0
         repeat(count) { index ->
             val key = properties.getProperty("profile.$index.key") ?: return@repeat
@@ -53,8 +62,27 @@ object SkillProfileStore {
                 cooldownHintMs = properties.getProperty("profile.$index.cooldownMs")?.toLongOrNull()
             )
         }
-        if (deduplicateInternal()) save()
+        val migrated = sourcePath != profilePath
+        if (deduplicateInternal() || migrated) save()
+        if (migrated) {
+            Files.move(
+                sourcePath,
+                sourcePath.resolveSibling(sourcePath.fileName.toString() + ".legacy"),
+                StandardCopyOption.REPLACE_EXISTING
+            )
+        }
     }
+
+    fun accountProfilePath(configDir: Path, uuid: UUID?, username: String): Path {
+        return configDir
+            .resolve(PROFILE_DIRECTORY)
+            .resolve("${accountId(uuid, username)}.properties")
+    }
+
+    fun accountId(uuid: UUID?, username: String): String =
+        (uuid ?: UUID.nameUUIDFromBytes("OfflinePlayer:$username".toByteArray(Charsets.UTF_8))).toString()
+
+    fun legacyProfilePath(configDir: Path): Path = configDir.resolve(LEGACY_PROFILE_FILE)
 
     @Synchronized
     fun register(descriptor: SkillDescriptor, sourceType: SkillSourceType = SkillSourceType.ITEM): SkillProfile = register(
