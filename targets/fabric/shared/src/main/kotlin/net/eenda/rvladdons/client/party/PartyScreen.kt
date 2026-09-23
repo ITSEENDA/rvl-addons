@@ -70,3 +70,4 @@ class PartyScreen(private val parent: Screen?) : Screen(Text.literal("Local Clon
         client?.setScreen(parent)
     }
 }
+

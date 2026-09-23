@@ -36,13 +36,16 @@ object LocalPartyController {
             PartyPresenceState.MAIN_MENU
         }
         publishPresence(client, state)
+        updateAttemptState(client)
     }
 
     fun onJoin(client: MinecraftClient) {
         publishPresence(client, PartyPresenceState.IN_SERVER)
+        updateAttemptState(client)
     }
 
     fun onDisconnect(client: MinecraftClient) {
+        attemptState = PartyAttemptState.IDLE
         publishPresence(client, PartyPresenceState.DISCONNECTED)
     }
 
@@ -89,7 +92,15 @@ object LocalPartyController {
             return
         }
         attemptState = PartyAttemptState.PREPARING
-        client.inGameHud.setOverlayMessage(Text.literal("Party draft: preparing local clients"), false)
+        updateAttemptState(client)
+        val selected = registry.selected()
+        val ready = selected.count { isEligible(it, client) }
+        val message = if (attemptState == PartyAttemptState.READY) {
+            "Party draft: all selected clients ready"
+        } else {
+            "Party draft: preparing clients ($ready/${selected.size})"
+        }
+        client.inGameHud.setOverlayMessage(Text.literal(message), false)
     }
 
     fun cancelDraft(client: MinecraftClient) {
@@ -100,9 +111,24 @@ object LocalPartyController {
     fun statusText(): String {
         val clients = registry.snapshot()
         if (clients.isEmpty()) return ""
-        val ready = clients.count { it.state == PartyPresenceState.IN_SERVER }
-        val selected = selectedCount()
-        return "Party ${selected}/${clients.size} | Ready $ready/${clients.size} | ${attemptState.name}"
+        val client = MinecraftClient.getInstance()
+        val selected = registry.selected()
+        val ready = selected.count { isEligible(it, client) }
+        return "Party ${selected.size}/${clients.size} | Ready $ready/${selected.size} | ${attemptState.name}"
+    }
+
+    private fun updateAttemptState(client: MinecraftClient) {
+        if (attemptState != PartyAttemptState.PREPARING && attemptState != PartyAttemptState.READY) return
+        val selected = registry.selected()
+        if (selected.isEmpty()) {
+            attemptState = PartyAttemptState.IDLE
+            return
+        }
+        attemptState = if (selected.all { isEligible(it, client) }) {
+            PartyAttemptState.READY
+        } else {
+            PartyAttemptState.PREPARING
+        }
     }
 
     private fun loadClientId(path: Path): String {
