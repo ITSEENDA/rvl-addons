@@ -4,6 +4,7 @@ import net.eenda.rvladdons.core.GameplayServerState
 import net.eenda.rvladdons.core.ModEnabledState
 import net.eenda.rvladdons.core.RvlAddonsConfigStore
 import net.eenda.rvladdons.core.RvlAddonsTrace
+import net.eenda.rvladdons.core.AccountStorage
 import net.eenda.rvladdons.feature.coma.ComaStateStore
 import net.eenda.rvladdons.feature.cooldown.SkillProfileStore
 import net.eenda.rvladdons.client.coma.ComaSwapController
@@ -33,8 +34,16 @@ object RvlAddonsClient : ClientModInitializer {
     private lateinit var comaSwapKey: KeyBinding
 
     override fun onInitializeClient() {
-        RvlAddonsConfigStore.load(FabricLoader.getInstance().configDir.resolve("rvl-addons.properties"))
-        ComaStateStore.load(FabricLoader.getInstance().configDir.resolve("rvl-addons-coma-state.properties"))
+        val configDir = FabricLoader.getInstance().configDir
+        val session = MinecraftClient.getInstance().session
+        RvlAddonsConfigStore.load(
+            configDir.resolve("rvl-addons.properties"),
+            AccountStorage.path(configDir, "rvl-addons-coma-profiles", session.uuidOrNull, session.username)
+        )
+        ComaStateStore.load(
+            AccountStorage.path(configDir, "rvl-addons-coma-state", session.uuidOrNull, session.username),
+            ComaStateStore.legacyStatePath(configDir)
+        )
         SkillProfileStore.load(FabricLoader.getInstance().configDir.resolve("rvl-addons-skill-profiles.properties"))
         ModEnabledState.set(RvlAddonsConfigStore.config.enabled)
         RvlAddonsHudRenderer.register()
