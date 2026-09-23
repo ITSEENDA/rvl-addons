@@ -29,24 +29,20 @@ object RvlAddonsConfigStore {
         private set
 
     private var path: Path? = null
+    private var comaProfilePath: Path? = null
 
-    fun load(configPath: Path) {
+    fun load(configPath: Path, accountComaProfilePath: Path? = null) {
         path = configPath
+        comaProfilePath = accountComaProfilePath
         val properties = Properties()
         if (Files.exists(configPath)) {
             Files.newInputStream(configPath).use(properties::load)
         }
 
-        val comaSetCount = properties.getProperty("coma.set.count")?.toIntOrNull()?.coerceIn(0, 50) ?: 1
-        val comaSets = MutableList(comaSetCount) { index ->
-            ComaSetConfig(
-                name = properties.getProperty("coma.set.$index.name") ?: "Set ${index + 1}",
-                enabled = properties.getProperty("coma.set.$index.enabled")?.toBooleanStrictOrNull() ?: true,
-                helmet = properties.getProperty("coma.set.$index.helmet") ?: "",
-                chestplate = properties.getProperty("coma.set.$index.chestplate") ?: "",
-                leggings = properties.getProperty("coma.set.$index.leggings") ?: "",
-                boots = properties.getProperty("coma.set.$index.boots") ?: ""
-            )
+        val accountProperties = accountComaProfilePath?.takeIf(Files::exists)?.let(::loadProperties)
+        val comaSets = readComaSets(accountProperties ?: properties)
+        val hasLegacyComaSets = accountProperties == null && properties.keys.any {
+            it.toString().startsWith("coma.set.")
         }
 
         config = RvlAddonsConfig(
@@ -113,6 +109,8 @@ object RvlAddonsConfigStore {
             ),
             comaSets = comaSets
         )
+
+        if (hasLegacyComaSets) save()
     }
 
     fun save() {
@@ -153,6 +151,31 @@ object RvlAddonsConfigStore {
         properties["coma.timing.clearToMoveMs"] = config.comaTiming.clearToMoveMs.toString()
         properties["coma.timing.moveIntervalMs"] = config.comaTiming.moveIntervalMs.toString()
         properties["coma.timing.closeMs"] = config.comaTiming.closeMs.toString()
+
+        val profilePath = comaProfilePath
+        if (profilePath == null) {
+            writeComaSets(properties)
+        } else {
+            writeComaSets(profilePath)
+        }
+        Files.newOutputStream(configPath).use { properties.store(it, "RVL Addons configuration") }
+    }
+
+    private fun readComaSets(properties: Properties): MutableList<ComaSetConfig> {
+        val count = properties.getProperty("coma.set.count")?.toIntOrNull()?.coerceIn(0, 50) ?: 1
+        return MutableList(count) { index ->
+            ComaSetConfig(
+                name = properties.getProperty("coma.set.$index.name") ?: "Set ${index + 1}",
+                enabled = properties.getProperty("coma.set.$index.enabled")?.toBooleanStrictOrNull() ?: true,
+                helmet = properties.getProperty("coma.set.$index.helmet") ?: "",
+                chestplate = properties.getProperty("coma.set.$index.chestplate") ?: "",
+                leggings = properties.getProperty("coma.set.$index.leggings") ?: "",
+                boots = properties.getProperty("coma.set.$index.boots") ?: ""
+            )
+        }
+    }
+
+    private fun writeComaSets(properties: Properties) {
         properties["coma.set.count"] = config.comaSets.size.toString()
         config.comaSets.forEachIndexed { index, set ->
             properties["coma.set.$index.name"] = set.name
@@ -162,7 +185,16 @@ object RvlAddonsConfigStore {
             properties["coma.set.$index.leggings"] = set.leggings
             properties["coma.set.$index.boots"] = set.boots
         }
+    }
 
-        Files.newOutputStream(configPath).use { properties.store(it, "RVL Addons configuration") }
+    private fun writeComaSets(profilePath: Path) {
+        Files.createDirectories(profilePath.parent)
+        val properties = Properties()
+        writeComaSets(properties)
+        Files.newOutputStream(profilePath).use { properties.store(it, "RVL Addons COMA profiles") }
+    }
+
+    private fun loadProperties(path: Path): Properties = Properties().also { properties ->
+        Files.newInputStream(path).use(properties::load)
     }
 }

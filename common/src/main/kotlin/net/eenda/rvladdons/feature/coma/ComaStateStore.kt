@@ -2,6 +2,7 @@ package net.eenda.rvladdons.feature.coma
 
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardCopyOption
 import java.util.Properties
 
 data class PersistedComaState(
@@ -14,21 +15,35 @@ object ComaStateStore {
     private var path: Path? = null
     private var state = PersistedComaState("", emptyList(), emptyList())
 
-    fun load(statePath: Path) {
+    fun load(statePath: Path, legacyPath: Path? = null) {
         path = statePath
-        if (!Files.exists(statePath)) {
-            state = PersistedComaState("", emptyList(), emptyList())
-            return
+        val sourcePath = when {
+            Files.exists(statePath) -> statePath
+            legacyPath != null && Files.exists(legacyPath) -> legacyPath
+            else -> {
+                state = PersistedComaState("", emptyList(), emptyList())
+                return
+            }
         }
         val properties = Properties()
-        Files.newInputStream(statePath).use(properties::load)
+        Files.newInputStream(sourcePath).use(properties::load)
         val count = properties.getProperty("rule.count")?.toIntOrNull()?.coerceIn(0, 4) ?: 0
         state = PersistedComaState(
             serverKey = properties.getProperty("server")?.trim().orEmpty(),
             rules = List(count) { index -> properties.getProperty("rule.$index").orEmpty() },
             iconItemIds = List(count) { index -> properties.getProperty("icon.$index").orEmpty() }
         )
+        if (sourcePath != statePath) {
+            save(state.serverKey, state.rules, state.iconItemIds)
+            Files.move(
+                sourcePath,
+                sourcePath.resolveSibling(sourcePath.fileName.toString() + ".legacy"),
+                StandardCopyOption.REPLACE_EXISTING
+            )
+        }
     }
+
+    fun legacyStatePath(configDir: Path): Path = configDir.resolve("rvl-addons-coma-state.properties")
 
     fun current(): PersistedComaState = state
 
