@@ -2,8 +2,11 @@ package net.eenda.rvladdons.feature.cooldown
 
 import java.nio.file.Files
 import java.util.Properties
+import java.util.UUID
 import java.util.concurrent.Executors
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SkillProfileStoreTest {
@@ -52,6 +55,51 @@ class SkillProfileStoreTest {
             executor.shutdownNow()
             Files.deleteIfExists(path)
         }
+    }
+
+    @Test
+    fun isolatesProfilesByAccountAndMigratesLegacyFileOnce() {
+        val directory = Files.createTempDirectory("rvl-skill-profiles-accounts")
+        val legacyPath = SkillProfileStore.legacyProfilePath(directory)
+        val accountAPath = SkillProfileStore.accountProfilePath(
+            directory,
+            UUID.fromString("00000000-0000-0000-0000-000000000001"),
+            "Alice"
+        )
+        val accountBPath = SkillProfileStore.accountProfilePath(
+            directory,
+            UUID.fromString("00000000-0000-0000-0000-000000000002"),
+            "Bob"
+        )
+        try {
+            val properties = Properties()
+            properties["profile.count"] = "1"
+            writeProfile(properties, 0, "legacy", "Legacy skill", "legacy", "ITEM")
+            Files.newOutputStream(legacyPath).use { properties.store(it, null) }
+
+            SkillProfileStore.load(accountAPath, legacyPath)
+            assertEquals(listOf("legacy"), SkillProfileStore.all().map { it.skillKey })
+            assertTrue(Files.exists(accountAPath))
+            assertFalse(Files.exists(legacyPath))
+            assertTrue(Files.exists(legacyPath.resolveSibling("${legacyPath.fileName}.legacy")))
+
+            SkillProfileStore.load(accountBPath, legacyPath)
+            assertTrue(SkillProfileStore.all().isEmpty())
+        } finally {
+            directory.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun createsDeterministicOfflineAccountId() {
+        assertEquals(
+            SkillProfileStore.accountId(null, "Alice"),
+            SkillProfileStore.accountId(null, "Alice")
+        )
+        assertFalse(
+            SkillProfileStore.accountId(null, "Alice") ==
+                SkillProfileStore.accountId(null, "Bob")
+        )
     }
 
     private fun writeProfile(
