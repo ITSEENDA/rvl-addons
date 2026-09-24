@@ -83,7 +83,7 @@ object CooldownController {
             "action triggers=${allowedTriggers.joinToString { it.name }} hand=${skillHand.name} " +
                 "candidates=${candidates.joinToString { it.descriptor.skillKey }} item=${compactName(stack)}"
         )
-        pending.actions.filter { it.at == now }.forEach(runtime::startEstimated)
+        pending.actionsAt(now).forEach(runtime::startEstimated)
     }
 
     fun observeInputTransitions(client: MinecraftClient) {
@@ -152,7 +152,7 @@ object CooldownController {
             )
         }
         pending.prune(now)
-        pending.actions.filter { it.at == now }.forEach(runtime::startEstimated)
+        pending.actionsAt(now).forEach(runtime::startEstimated)
     }
 
     private fun cancelGesture(trigger: SkillTrigger, now: Long) {

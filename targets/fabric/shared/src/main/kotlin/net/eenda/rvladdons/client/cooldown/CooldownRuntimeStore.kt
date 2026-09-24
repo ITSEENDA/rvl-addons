@@ -8,11 +8,13 @@ import net.eenda.rvladdons.feature.cooldown.PendingSkillAction
 import net.eenda.rvladdons.feature.cooldown.SkillProfileStore
 import net.eenda.rvladdons.feature.cooldown.SkillTrigger
 import net.minecraft.item.ItemStack
+import java.util.concurrent.ConcurrentHashMap
 
 /** Owns active cooldown entries, estimated starts and runtime icon snapshots. */
 internal class CooldownRuntimeStore(private val pending: CooldownPendingActionStore) {
     internal val registry = CooldownRegistry()
-    internal val icons = mutableMapOf<String, ItemStack>()
+    internal val icons = ConcurrentHashMap<String, ItemStack>()
+    @Volatile
     internal var lastSkillKey: String? = null
 
     fun clear() {
@@ -65,7 +67,7 @@ internal class CooldownRuntimeStore(private val pending: CooldownPendingActionSt
         )
         if (!profile.enabled) return
         val hint = profile.cooldownHintMs ?: source.cooldownHintMs ?: return
-        pending.icons[action]?.let { icon -> if (!icon.isEmpty) icons.putIfAbsent(key, icon.copy()) }
+        pending.iconFor(action)?.let { icon -> if (!icon.isEmpty) icons.putIfAbsent(key, icon) }
         val existing = registry.get(key)
         if (existing != null && existing.endAt > action.at) {
             lastSkillKey = key

@@ -7,27 +7,42 @@ import net.minecraft.item.ItemStack
 
 /** Owns pending input actions and their temporary icon snapshots. */
 internal class CooldownPendingActionStore {
-    val actions = mutableListOf<PendingSkillAction>()
-    val icons = mutableMapOf<PendingSkillAction, ItemStack>()
+    private val actions = mutableListOf<PendingSkillAction>()
+    private val icons = mutableMapOf<PendingSkillAction, ItemStack>()
 
+    @Synchronized
     fun clear() {
         actions.clear()
         icons.clear()
     }
 
+    @Synchronized
     fun prune(now: Long) {
         actions.removeIf { now - it.at > 2_000L }
     }
 
+    @Synchronized
     fun remove(action: PendingSkillAction) {
         actions.remove(action)
         icons.remove(action)
     }
 
+    @Synchronized
     fun removeIf(predicate: (PendingSkillAction) -> Boolean) {
         actions.filter(predicate).forEach(::remove)
     }
 
+    @Synchronized
+    fun iconFor(action: PendingSkillAction): ItemStack? = icons[action]?.copy()
+
+    @Synchronized
+    fun takeIcon(action: PendingSkillAction): ItemStack? = icons.remove(action)?.copy()
+
+    @Synchronized
+    fun actionsAt(timestamp: Long): List<PendingSkillAction> =
+        actions.filter { it.at == timestamp }
+
+    @Synchronized
     fun queue(
         action: PendingSkillAction,
         icon: ItemStack?,
@@ -56,6 +71,7 @@ internal class CooldownPendingActionStore {
         return removed
     }
 
+    @Synchronized
     fun cancelGesture(trigger: SkillTrigger, now: Long): List<PendingSkillAction> {
         val removed = actions.filter {
             it.trigger == trigger && now - it.at in 0..CooldownActionTracker.HAND_DUPLICATE_WINDOW_MS
@@ -64,6 +80,7 @@ internal class CooldownPendingActionStore {
         return removed
     }
 
+    @Synchronized
     fun select(now: Long, remainingMs: Long): PendingSkillAction? =
         actions.filter { now - it.at in 0..900L }
             .maxByOrNull { action ->

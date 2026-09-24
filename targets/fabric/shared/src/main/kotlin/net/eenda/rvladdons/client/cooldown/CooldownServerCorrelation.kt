@@ -89,7 +89,7 @@ internal class CooldownServerCorrelation(
 
         if (existing != null) {
             if (!icons.containsKey(key)) {
-                val icon = action?.let { pending.icons[it] }
+                val icon = action?.let(pending::iconFor)
                     ?: source?.let { stackForSource(it) ?: net.eenda.rvladdons.client.coma.FabricComaItemAdapter.iconStack(it.itemId) }
                 if (icon != null && !icon.isEmpty) icons[key] = icon.copy()
             }
@@ -115,7 +115,7 @@ internal class CooldownServerCorrelation(
         }
 
         action?.let { selected ->
-            pending.icons.remove(selected)?.let { stack -> icons[key] = stack.copy() }
+            pending.takeIcon(selected)?.let { stack -> icons[key] = stack }
             pending.remove(selected)
         }
         setLastSkillKey(key)
