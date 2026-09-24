@@ -4,6 +4,7 @@ import net.eenda.rvladdons.RvlAddonsClient
 import net.eenda.rvladdons.client.coma.ComaSwapController
 import net.eenda.rvladdons.client.cooldown.CooldownController
 import net.eenda.rvladdons.client.cooldown.CooldownHudRenderer
+import net.eenda.rvladdons.client.party.LocalPartyController
 import dev.tako.libs.client.ui.feedback.TakoToastManager
 import net.eenda.rvladdons.core.HudComponent
 import net.eenda.rvladdons.core.HudLayout
@@ -44,6 +45,10 @@ object RvlAddonsHudRenderer {
 
             if (config.hudComaVisible && RvlAddonsClient.isGameplayServerActive()) {
                 drawComponent(context, client, HudComponent.COMA)
+            }
+
+            if (config.hudPartyVisible && LocalPartyController.statusText().isNotBlank()) {
+                drawComponent(context, client, HudComponent.PARTY)
             }
         }
     }
@@ -116,6 +121,7 @@ object RvlAddonsHudRenderer {
                     }
                 }
             }
+            HudComponent.PARTY -> drawParty(context, client)
         }
 
         context.matrices.pop()
@@ -127,6 +133,14 @@ object RvlAddonsHudRenderer {
         context.fill(0, 0, (COOLDOWN_WIDTH * progress).roundToInt(), 3, 0xFF55AAFF.toInt())
         context.drawTextWithShadow(client.textRenderer, Text.literal("Crimson Katana"), 6, 7, 0xFFFFFF)
         context.drawTextWithShadow(client.textRenderer, Text.literal("[RMB]  0.6s"), 6, 20, 0xAAAAAA)
+    }
+
+    private fun drawParty(context: DrawContext, client: MinecraftClient) {
+        val text = LocalPartyController.statusText().ifBlank { "Party 1/2 | Ready 1/2 | PREPARING" }
+        val width = client.textRenderer.getWidth(text) + 12
+        val height = client.textRenderer.fontHeight + 8
+        context.fill(0, 0, width, height, 0xAA101010.toInt())
+        context.drawTextWithShadow(client.textRenderer, Text.literal(text), 6, 4, 0xFF66CCFF.toInt())
     }
 
     private fun baseSize(client: MinecraftClient, component: HudComponent): Pair<Int, Int> = when (component) {
@@ -144,6 +158,10 @@ object RvlAddonsHudRenderer {
             maxOf(itemWidth, client.textRenderer.getWidth(ComaSwapController.hudText())) to
                 (client.textRenderer.fontHeight + COMA_ITEM_SIZE + 2)
         }
+        HudComponent.PARTY -> {
+            val text = LocalPartyController.statusText().ifBlank { "Party 1/2 | Ready 1/2 | PREPARING" }
+            (client.textRenderer.getWidth(text) + 12) to (client.textRenderer.fontHeight + 8)
+        }
     }
 
     private fun layoutFor(component: HudComponent): HudLayout = when (component) {
@@ -151,6 +169,7 @@ object RvlAddonsHudRenderer {
         HudComponent.TRACE -> RvlAddonsConfigStore.config.hudTrace
         HudComponent.COOLDOWN -> RvlAddonsConfigStore.config.hudCooldown
         HudComponent.COMA -> RvlAddonsConfigStore.config.hudComa
+        HudComponent.PARTY -> RvlAddonsConfigStore.config.hudParty
     }
 }
 

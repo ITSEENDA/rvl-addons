@@ -102,6 +102,7 @@ class HudLayoutEditorScreen(private val parent: Screen?) : Screen(Text.literal("
         drawComponent(context, minecraft, HudComponent.TRACE)
         drawComponent(context, minecraft, HudComponent.COOLDOWN)
         drawComponent(context, minecraft, HudComponent.COMA)
+        drawComponent(context, minecraft, HudComponent.PARTY)
         drawPropertiesPanel(context)
     }
 
@@ -118,7 +119,7 @@ class HudLayoutEditorScreen(private val parent: Screen?) : Screen(Text.literal("
             return true
         }
 
-        val hit = listOf(HudComponent.COMA, HudComponent.COOLDOWN, HudComponent.TRACE, HudComponent.STATUS)
+        val hit = listOf(HudComponent.PARTY, HudComponent.COMA, HudComponent.COOLDOWN, HudComponent.TRACE, HudComponent.STATUS)
             .firstOrNull { contains(componentRect(it), mouseX, mouseY) }
         if (hit != null) {
             selectedComponent = hit
@@ -251,6 +252,7 @@ class HudLayoutEditorScreen(private val parent: Screen?) : Screen(Text.literal("
         HudComponent.TRACE -> RvlAddonsConfigStore.config.hudTrace
         HudComponent.COOLDOWN -> RvlAddonsConfigStore.config.hudCooldown
         HudComponent.COMA -> RvlAddonsConfigStore.config.hudComa
+        HudComponent.PARTY -> RvlAddonsConfigStore.config.hudParty
     }
 
     private fun componentName(component: HudComponent): String = when (component) {
@@ -258,6 +260,7 @@ class HudLayoutEditorScreen(private val parent: Screen?) : Screen(Text.literal("
         HudComponent.TRACE -> "Trace status"
         HudComponent.COOLDOWN -> "Cooldown"
         HudComponent.COMA -> "COMA set"
+        HudComponent.PARTY -> "Party status"
     }
 
     private fun contains(rect: HudRect, x: Double, y: Double): Boolean =
@@ -388,6 +391,7 @@ class HudLayoutEditorScreen(private val parent: Screen?) : Screen(Text.literal("
         HudComponent.TRACE -> 26
         HudComponent.COOLDOWN -> 46
         HudComponent.COMA -> 70
+        HudComponent.PARTY -> 94
     }
 
     private fun editLayouts(

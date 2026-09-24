@@ -4,6 +4,7 @@ import net.eenda.rvladdons.feature.coma.ComaSetConfig
 import net.eenda.rvladdons.feature.coma.ComaTimingConfig
 import net.eenda.rvladdons.feature.revive.AutoReviveConfig
 import net.eenda.rvladdons.feature.revive.AutoReviveMode
+import net.eenda.rvladdons.feature.party.PartyJoinExecutionMode
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.Properties
@@ -18,7 +19,11 @@ data class RvlAddonsConfig(
     var hudCooldown: HudLayout = HudLayout(offsetY = 46),
     var hudComaVisible: Boolean = true,
     var hudComa: HudLayout = HudLayout(offsetY = 70),
+    var hudPartyVisible: Boolean = true,
+    var hudParty: HudLayout = HudLayout(offsetY = 94),
     var autoRevive: AutoReviveConfig = AutoReviveConfig(),
+    var partyJoinExecutionMode: PartyJoinExecutionMode = PartyJoinExecutionMode.MANUAL,
+    var partyDebugToasts: Boolean = true,
     var comaSwapServerSync: Boolean = true,
     var comaTiming: ComaTimingConfig = ComaTimingConfig(),
     var comaSets: MutableList<ComaSetConfig> = mutableListOf(ComaSetConfig())
@@ -83,6 +88,15 @@ object RvlAddonsConfigStore {
                 offsetY = properties.getProperty("hud.coma.offsetY")?.toIntOrNull() ?: 70,
                 scale = properties.getProperty("hud.coma.scale")?.toFloatOrNull()?.coerceIn(0.5f, 2f) ?: 1f
             ),
+            hudPartyVisible = properties.getProperty("hud.party.visible")?.toBooleanStrictOrNull() ?: true,
+            hudParty = HudLayout(
+                anchor = properties.getProperty("hud.party.anchor")?.let {
+                    runCatching { HudAnchor.valueOf(it) }.getOrNull()
+                } ?: HudAnchor.TOP_LEFT,
+                offsetX = properties.getProperty("hud.party.offsetX")?.toIntOrNull() ?: 8,
+                offsetY = properties.getProperty("hud.party.offsetY")?.toIntOrNull() ?: 94,
+                scale = properties.getProperty("hud.party.scale")?.toFloatOrNull()?.coerceIn(0.5f, 2f) ?: 1f
+            ),
             autoRevive = AutoReviveConfig(
                 enabled = properties.getProperty("revive.enabled")?.toBooleanStrictOrNull()
                     ?: properties.getProperty("revive.mode")?.let { it != "NONE" }
@@ -99,6 +113,10 @@ object RvlAddonsConfigStore {
                 soundEnabled = properties.getProperty("revive.sound.enabled")?.toBooleanStrictOrNull() ?: true,
                 soundVolume = properties.getProperty("revive.sound.volume")?.toFloatOrNull()?.coerceIn(0f, 1f) ?: 1f
             ),
+            partyJoinExecutionMode = runCatching {
+                PartyJoinExecutionMode.valueOf(properties.getProperty("party.join.mode").orEmpty())
+            }.getOrDefault(PartyJoinExecutionMode.MANUAL),
+            partyDebugToasts = properties.getProperty("party.debug.toasts")?.toBooleanStrictOrNull() ?: true,
             comaSwapServerSync = properties.getProperty("coma.swap.serverSync")?.toBooleanStrictOrNull() ?: true,
             comaTiming = ComaTimingConfig(
                 openMs = properties.getProperty("coma.timing.openMs")?.toIntOrNull()?.coerceIn(0, 5000) ?: 50,
@@ -139,12 +157,19 @@ object RvlAddonsConfigStore {
         properties["hud.coma.offsetX"] = config.hudComa.offsetX.toString()
         properties["hud.coma.offsetY"] = config.hudComa.offsetY.toString()
         properties["hud.coma.scale"] = config.hudComa.scale.toString()
+        properties["hud.party.visible"] = config.hudPartyVisible.toString()
+        properties["hud.party.anchor"] = config.hudParty.anchor.name
+        properties["hud.party.offsetX"] = config.hudParty.offsetX.toString()
+        properties["hud.party.offsetY"] = config.hudParty.offsetY.toString()
+        properties["hud.party.scale"] = config.hudParty.scale.toString()
         properties["revive.enabled"] = config.autoRevive.enabled.toString()
         properties["revive.mode"] = config.autoRevive.mode.name
         properties["revive.respawn.delayMs"] = config.autoRevive.respawnDelayMs.toString()
         properties["revive.back.delayMs"] = config.autoRevive.backDelayMs.toString()
         properties["revive.sound.enabled"] = config.autoRevive.soundEnabled.toString()
         properties["revive.sound.volume"] = config.autoRevive.soundVolume.toString()
+        properties["party.join.mode"] = config.partyJoinExecutionMode.name
+        properties["party.debug.toasts"] = config.partyDebugToasts.toString()
         properties["coma.swap.serverSync"] = config.comaSwapServerSync.toString()
         properties["coma.timing.openMs"] = config.comaTiming.openMs.toString()
         properties["coma.timing.clearIntervalMs"] = config.comaTiming.clearIntervalMs.toString()

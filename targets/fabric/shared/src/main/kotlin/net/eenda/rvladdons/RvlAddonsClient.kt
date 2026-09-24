@@ -13,11 +13,11 @@ import net.eenda.rvladdons.client.cooldown.CooldownController
 import net.eenda.rvladdons.client.hud.RvlAddonsHudRenderer
 import net.eenda.rvladdons.client.revive.AutoReviveController
 import net.eenda.rvladdons.client.party.LocalPartyController
-import net.eenda.rvladdons.client.party.PartyHudRenderer
 import net.eenda.rvladdons.client.party.PartyScreen
 import net.fabricmc.api.ClientModInitializer
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper
+import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents
 import net.fabricmc.fabric.api.client.message.v1.ClientSendMessageEvents
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents
 import net.fabricmc.loader.api.FabricLoader
@@ -52,11 +52,10 @@ object RvlAddonsClient : ClientModInitializer {
             SkillProfileStore.accountProfilePath(configDir, session.uuidOrNull, session.username),
             SkillProfileStore.legacyProfilePath(configDir)
         )
-        LocalPartyController.initialize()
         ModEnabledState.set(RvlAddonsConfigStore.config.enabled)
+        LocalPartyController.initialize()
         RvlAddonsHudRenderer.register()
         AutoReviveController.registerKeyBinding()
-        PartyHudRenderer.register()
 
         traceKey = KeyBindingHelper.registerKeyBinding(
             KeyBinding(
@@ -102,8 +101,18 @@ object RvlAddonsClient : ClientModInitializer {
             RvlAddonsTrace.log("chat-out", message)
         }
 
+        ClientSendMessageEvents.ALLOW_COMMAND.register { command ->
+            val allowed = LocalPartyController.handleOutgoingCommand(command)
+            if (!allowed) RvlAddonsTrace.log("command-out", "$command [party-intercepted]")
+            allowed
+        }
+
         ClientSendMessageEvents.COMMAND.register { command ->
             RvlAddonsTrace.log("command-out", command)
+        }
+
+        ClientReceiveMessageEvents.GAME.register { message, overlay ->
+            if (!overlay) LocalPartyController.handleJoinChat(message.string)
         }
 
         ClientPlayConnectionEvents.JOIN.register { _, _, client ->
@@ -138,7 +147,7 @@ object RvlAddonsClient : ClientModInitializer {
             }
             AutoReviveController.handleKeyBinding()
             while (partyKey.wasPressed()) {
-                client.setScreen(PartyScreen(client.currentScreen))
+                if (ModEnabledState.isEnabled()) client.setScreen(PartyScreen(client.currentScreen))
             }
             LocalPartyController.tick(client)
             CooldownController.observeInputTransitions(client)
@@ -173,6 +182,10 @@ object RvlAddonsClient : ClientModInitializer {
         val enabled = ModEnabledState.toggle()
         RvlAddonsConfigStore.config.enabled = enabled
         RvlAddonsConfigStore.save()
+        LocalPartyController.setEnabled(enabled)
+        if (!enabled && MinecraftClient.getInstance().currentScreen is PartyScreen) {
+            MinecraftClient.getInstance().setScreen(null)
+        }
         logger.info("RVL Addons enabled: {}", enabled)
         RvlAddonsTrace.log("mod-state", "enabled=$enabled")
         MinecraftClient.getInstance().inGameHud.setOverlayMessage(

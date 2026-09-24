@@ -16,6 +16,19 @@ enum class PartyAttemptState {
     FAILED
 }
 
+enum class PartyMenuStage {
+    UNKNOWN,
+    TYPE_MENU,
+    ROOM_MENU,
+    AUTO_JOINED,
+    JOINED
+}
+
+enum class PartyManualActionType {
+    SELECT_TYPE,
+    SELECT_ROOM
+}
+
 data class PartyClientSnapshot(
     val clientId: String,
     val name: String,
@@ -23,7 +36,21 @@ data class PartyClientSnapshot(
     val serverKey: String,
     val modVersion: String,
     val selected: Boolean = false,
-    val lastSeenAt: Long = System.currentTimeMillis()
+    val lastSeenAt: Long = System.currentTimeMillis(),
+    val isCoordinator: Boolean = false,
+    val partyState: PartyAttemptState = PartyAttemptState.IDLE,
+    val partySelectedCount: Int = 0,
+    val partyReadyCount: Int = 0
+)
+
+data class PartyManualAction(
+    val sequence: Int,
+    val slot: Int,
+    val button: Int,
+    val action: String,
+    val intentVersion: Int = 0,
+    val type: PartyManualActionType = PartyManualActionType.SELECT_TYPE,
+    val targetSignature: String = ""
 )
 
 class PartyRegistry {

@@ -16,6 +16,7 @@ import dev.isxander.yacl3.api.controller.IntegerFieldControllerBuilder
 import net.eenda.rvladdons.core.ModEnabledState
 import net.eenda.rvladdons.core.RvlAddonsConfigStore
 import net.eenda.rvladdons.feature.revive.AutoReviveMode
+import net.eenda.rvladdons.feature.party.PartyJoinExecutionMode
 import net.minecraft.client.MinecraftClient
 import net.minecraft.client.gui.screen.Screen
 import net.minecraft.text.Text
@@ -73,6 +74,14 @@ object RvlAddonsConfigScreen {
                 Option.createBuilder<Boolean>()
                     .name(Text.literal("Show COMA set"))
                     .binding(config.hudComaVisible, { config.hudComaVisible }, { config.hudComaVisible = it })
+                    .controller { BooleanControllerBuilder.create(it).coloured(true).onOffFormatter() }
+                    .build()
+            )
+            .option(
+                Option.createBuilder<Boolean>()
+                    .name(Text.literal("Show Party status"))
+                    .description(OptionDescription.of(Text.literal("Show local party connection and readiness status.")))
+                    .binding(config.hudPartyVisible, { config.hudPartyVisible }, { config.hudPartyVisible = it })
                     .controller { BooleanControllerBuilder.create(it).coloured(true).onOffFormatter() }
                     .build()
             )
@@ -144,6 +153,28 @@ object RvlAddonsConfigScreen {
         val featuresCategory = ConfigCategory.createBuilder()
             .name(Text.literal("Features"))
             .group(comaGroup)
+            .group(
+                OptionGroup.createBuilder()
+                    .name(Text.literal("Party"))
+                    .description(OptionDescription.of(Text.literal("Control how the coordinator synchronizes /dchien execution.")))
+                    .option(
+                        Option.createBuilder<PartyJoinExecutionMode>()
+                            .name(Text.literal("Join execution mode"))
+                            .description(OptionDescription.of(Text.literal("Manual mirrors coordinator actions; Automatic lets each client run the join executor.")))
+                            .binding(config.partyJoinExecutionMode, { config.partyJoinExecutionMode }, { config.partyJoinExecutionMode = it })
+                            .controller { EnumControllerBuilder.create(it).enumClass(PartyJoinExecutionMode::class.java) }
+                            .build()
+                    )
+                    .option(
+                        Option.createBuilder<Boolean>()
+                            .name(Text.literal("Party debug toasts"))
+                            .description(OptionDescription.of(Text.literal("Show connection, sync and join phase notifications.")))
+                            .binding(config.partyDebugToasts, { config.partyDebugToasts }, { config.partyDebugToasts = it })
+                            .controller { BooleanControllerBuilder.create(it).coloured(true).onOffFormatter() }
+                            .build()
+                    )
+                    .build()
+            )
             .group(
                 OptionGroup.createBuilder()
                     .name(Text.literal("Cooldown"))
