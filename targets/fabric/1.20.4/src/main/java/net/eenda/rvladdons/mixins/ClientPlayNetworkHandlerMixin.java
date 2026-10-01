@@ -7,6 +7,7 @@ import net.minecraft.client.network.ClientPlayNetworkHandler;
 import net.minecraft.client.world.ClientWorld;
 import net.minecraft.network.ClientConnection;
 import net.minecraft.network.packet.s2c.play.OpenScreenS2CPacket;
+import net.minecraft.network.packet.s2c.play.PlayerPositionLookS2CPacket;
 import org.slf4j.Logger;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
@@ -33,5 +34,10 @@ public abstract class ClientPlayNetworkHandlerMixin extends ClientCommonNetworkH
     @Inject(method = "onOpenScreen", at = @At("TAIL"))
     private void rvladdons$partyMenuOpened(OpenScreenS2CPacket packet, CallbackInfo info) {
         LocalPartyController.INSTANCE.onServerMenuOpened();
+    }
+
+    @Inject(method = "onPlayerPositionLook(Lnet/minecraft/network/packet/s2c/play/PlayerPositionLookS2CPacket;)V", at = @At("TAIL"))
+    private void rvladdons$partyJoinTeleport(PlayerPositionLookS2CPacket packet, CallbackInfo info) {
+        LocalPartyController.INSTANCE.onServerPositionCorrection();
     }
 }

@@ -4,16 +4,11 @@ import net.eenda.rvladdons.feature.party.PartyClientSnapshot
 import net.eenda.rvladdons.feature.party.PartyManualAction
 import net.eenda.rvladdons.feature.party.PartyMenuStage
 import net.eenda.rvladdons.feature.party.PartyPresenceState
-import java.io.BufferedReader
 import java.io.BufferedWriter
 import java.io.IOException
-import java.net.BindException
-import java.net.InetAddress
-import java.net.InetSocketAddress
-import java.net.ServerSocket
-import java.net.Socket
+import java.net.*
 import java.nio.charset.StandardCharsets
-import java.util.Base64
+import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 
@@ -34,30 +29,37 @@ private object PartyProtocol {
     }
 }
 
-class LocalPartyTransport(
-    private val onSnapshot: (List<PartyClientSnapshot>) -> Unit,
-    private val onPrepare: (String, String) -> Unit,
-    private val onReady: (String, String, Boolean, String) -> Unit,
-    private val onPromoteRequest: (String) -> Unit,
-    private val onPromotionReady: (String, String, Boolean, String) -> Unit,
-    private val onJoinGo: (String, String, Int, Int) -> Unit,
-    private val onJoinResult: (String, String, Boolean, String) -> Unit,
-    private val onPartyCommand: (String) -> Unit,
-    private val onManualCommand: (String, String) -> Unit,
-    private val onManualMenuReady: (String, String) -> Unit,
-    private val onManualMenuState: (String, String, PartyMenuStage, Int) -> Unit,
-    private val onManualClick: (String, Int, Int, Int, String, Int, String, String) -> Unit,
-    private val onManualRoomAccepted: (String, Int, Int, Int, String, Int, String, String) -> Unit,
-    private val onManualReplayBegin: (String) -> Unit,
-    private val onManualAck: (String, String, Int) -> Unit,
-    private val onManualResync: (String, String, Int) -> Unit,
-    private val onJoinCancel: (String) -> Unit,
-    private val onStatus: (String) -> Unit
+internal data class PartyTransportCallbacks(
+    val onSnapshot: (List<PartyClientSnapshot>) -> Unit,
+    val onPrepare: (String, String) -> Unit,
+    val onReady: (String, String, Boolean, String) -> Unit,
+    val onPromoteRequest: (String) -> Unit,
+    val onPromotionReady: (String, String, Boolean, String) -> Unit,
+    val onJoinGo: (String, String, Int, Int) -> Unit,
+    val onJoinResult: (String, String, Boolean, String) -> Unit,
+    val onPartyCommand: (String) -> Unit,
+    val onManualCommand: (String, String) -> Unit,
+    val onManualMenuReady: (String, String) -> Unit,
+    val onManualMenuState: (String, String, PartyMenuStage, Int) -> Unit,
+    val onManualClick: (String, Int, Int, Int, String, Int, String, String) -> Unit,
+    val onManualRoomAccepted: (String, Int, Int, Int, String, Int, String, String) -> Unit,
+    val onManualReplayBegin: (String) -> Unit,
+    val onManualAck: (String, String, Int) -> Unit,
+    val onManualResync: (String, String, Int) -> Unit,
+    val onJoinCancel: (String) -> Unit,
+    val onJoinCancelRequest: (String, String) -> Unit,
+    val onStatus: (String) -> Unit
+)
+
+internal class LocalPartyTransport(
+    private val callbacks: PartyTransportCallbacks
 ) {
     companion object {
         const val PORT = 28765
         private const val CONNECT_TIMEOUT_MS = 500
         private const val RETRY_DELAY_MS = 1_000L
+        private const val HEARTBEAT_INTERVAL_MS = 1_000L
+        private const val HEARTBEAT_TIMEOUT_MS = 5_000L
         private const val PROMOTION_DELAY_MS = 100L
         private const val HANDOFF_CLIENT_WAIT_MS = 3_000L
     }
@@ -65,7 +67,8 @@ class LocalPartyTransport(
     private data class Peer(
         val socket: Socket,
         val writer: BufferedWriter,
-        var clientId: String? = null
+        var clientId: String? = null,
+        @Volatile var lastReceivedAt: Long = System.currentTimeMillis()
     ) {
         @Synchronized
         fun send(type: String, values: List<String> = emptyList()) {
@@ -102,6 +105,7 @@ class LocalPartyTransport(
     fun start() {
         if (running) return
         running = true
+        executor.execute { heartbeatLoop() }
         if (!tryBecomeCoordinator()) executor.execute { connectLoop() }
     }
 
@@ -136,8 +140,8 @@ class LocalPartyTransport(
         clientIds: Set<String>,
         attemptId: String,
         command: String,
-        gamemodeSlot: Int,
-        difficultySlot: Int
+        typeSlot: Int,
+        roomSlot: Int
     ): Int {
         if (!isCoordinator) return 0
         var sent = 0
@@ -146,12 +150,12 @@ class LocalPartyTransport(
             runCatching {
                 peer.send(
                     "JOIN_GO",
-                    listOf(attemptId, command, gamemodeSlot.toString(), difficultySlot.toString())
+                    listOf(attemptId, command, typeSlot.toString(), roomSlot.toString())
                 )
                 sent++
             }
         }
-        onStatus("join-go:$sent/${clientIds.size}")
+        callbacks.onStatus("join-go:$sent/${clientIds.size}")
         return sent
     }
 
@@ -169,6 +173,11 @@ class LocalPartyTransport(
         }
     }
 
+    fun sendJoinCancelRequest(attemptId: String) {
+        if (isCoordinator) return
+        clientPeer?.send("JOIN_CANCEL_REQUEST", listOf(attemptId))
+    }
+
     fun sendManualCommand(clientIds: Set<String>, attemptId: String, command: String): Int {
         if (!isCoordinator) return 0
         var sent = 0
@@ -179,7 +188,7 @@ class LocalPartyTransport(
                 sent++
             }
         }
-        onStatus("manual-command:$sent/${clientIds.size}")
+        callbacks.onStatus("manual-command:$sent/${clientIds.size}")
         return sent
     }
 
@@ -193,7 +202,7 @@ class LocalPartyTransport(
                 sent++
             }
         }
-        onStatus("party-command:$sent/${clientIds.size}")
+        callbacks.onStatus("party-command:$sent/${clientIds.size}")
         return sent
     }
 
@@ -346,6 +355,7 @@ class LocalPartyTransport(
             peer.socket.getInputStream().bufferedReader().useLines { lines ->
                 lines.forEach { line ->
                     val decoded = PartyProtocol.decode(line) ?: return@forEach
+                    peer.lastReceivedAt = System.currentTimeMillis()
                     when (decoded.first) {
                         "HELLO", "PRESENCE" -> {
                             val snapshot = snapshotFrom(decoded.second) ?: return@forEach
@@ -354,42 +364,56 @@ class LocalPartyTransport(
                             val wasKnown = remoteClients.containsKey(snapshot.clientId)
                             peers[snapshot.clientId] = peer
                             remoteClients[snapshot.clientId] = snapshot
-                            if (!wasKnown) onStatus("peer-connected:${snapshot.name}")
+                            if (!wasKnown) callbacks.onStatus("peer-connected:${snapshot.name}")
                             publishSnapshot()
                             broadcastSnapshot()
                         }
+
                         "READY" -> {
                             val clientId = peer.clientId ?: return@forEach
                             val attemptId = decoded.second.getOrNull(0) ?: return@forEach
                             val ready = decoded.second.getOrNull(1)?.toBooleanStrictOrNull() ?: false
                             val reason = decoded.second.getOrNull(2).orEmpty()
-                            onReady(clientId, attemptId, ready, reason)
+                            callbacks.onReady(clientId, attemptId, ready, reason)
                         }
+
                         "PROMOTION_READY" -> {
                             val clientId = peer.clientId ?: return@forEach
                             val handoffId = decoded.second.getOrNull(0) ?: return@forEach
                             val ready = decoded.second.getOrNull(1)?.toBooleanStrictOrNull() ?: false
                             val reason = decoded.second.getOrNull(2).orEmpty()
-                            onPromotionReady(clientId, handoffId, ready, reason)
+                            callbacks.onPromotionReady(clientId, handoffId, ready, reason)
                         }
+
                         "JOIN_RESULT" -> {
                             val clientId = peer.clientId ?: return@forEach
                             val attemptId = decoded.second.getOrNull(0) ?: return@forEach
                             val success = decoded.second.getOrNull(1)?.toBooleanStrictOrNull() ?: false
                             val reason = decoded.second.getOrNull(2).orEmpty()
-                            onJoinResult(clientId, attemptId, success, reason)
+                            callbacks.onJoinResult(clientId, attemptId, success, reason)
                         }
+
+                        "JOIN_CANCEL_REQUEST" -> {
+                            val clientId = peer.clientId ?: return@forEach
+                            callbacks.onJoinCancelRequest(clientId, decoded.second.getOrNull(0).orEmpty())
+                        }
+
+                        "PING" -> peer.send("PONG")
+                        "PONG" -> Unit
+
                         "MANUAL_ACK" -> {
                             val clientId = peer.clientId ?: return@forEach
                             val attemptId = decoded.second.getOrNull(0) ?: return@forEach
                             val sequence = decoded.second.getOrNull(1)?.toIntOrNull() ?: return@forEach
-                            onManualAck(clientId, attemptId, sequence)
+                            callbacks.onManualAck(clientId, attemptId, sequence)
                         }
+
                         "MANUAL_MENU_READY" -> {
                             val clientId = peer.clientId ?: return@forEach
                             val attemptId = decoded.second.getOrNull(0) ?: return@forEach
-                            onManualMenuReady(clientId, attemptId)
+                            callbacks.onManualMenuReady(clientId, attemptId)
                         }
+
                         "MANUAL_MENU_STATE" -> {
                             val clientId = peer.clientId ?: return@forEach
                             val attemptId = decoded.second.getOrNull(0) ?: return@forEach
@@ -397,13 +421,14 @@ class LocalPartyTransport(
                                 ?.let { runCatching { PartyMenuStage.valueOf(it) }.getOrNull() }
                                 ?: PartyMenuStage.UNKNOWN
                             val intentVersion = decoded.second.getOrNull(2)?.toIntOrNull() ?: 0
-                            onManualMenuState(clientId, attemptId, stage, intentVersion)
+                            callbacks.onManualMenuState(clientId, attemptId, stage, intentVersion)
                         }
+
                         "MANUAL_RESYNC" -> {
                             val clientId = peer.clientId ?: return@forEach
                             val attemptId = decoded.second.getOrNull(0) ?: return@forEach
                             val sequence = decoded.second.getOrNull(1)?.toIntOrNull() ?: 0
-                            onManualResync(clientId, attemptId, sequence)
+                            callbacks.onManualResync(clientId, attemptId, sequence)
                         }
                     }
                 }
@@ -414,7 +439,7 @@ class LocalPartyTransport(
             peer.clientId?.let {
                 val removed = peers.remove(it, peer)
                 remoteClients.remove(it)
-                if (removed) onStatus("peer-disconnected:$it")
+                if (removed) callbacks.onStatus("peer-disconnected:$it")
             }
             publishSnapshot()
             broadcastSnapshot()
@@ -434,7 +459,7 @@ class LocalPartyTransport(
                 socket.connect(InetSocketAddress(InetAddress.getLoopbackAddress(), PORT), CONNECT_TIMEOUT_MS)
                 val peer = Peer(socket, socket.getOutputStream().bufferedWriter())
                 clientPeer = peer
-                onStatus("connected")
+                callbacks.onStatus("connected")
                 localSnapshot?.let { peer.send("HELLO", snapshotFields(it)) }
                 socket.getInputStream().bufferedReader().useLines { lines ->
                     lines.forEach { line ->
@@ -455,6 +480,7 @@ class LocalPartyTransport(
 
     private fun handleClientFrame(frame: Pair<String, List<String>>?) {
         if (frame == null) return
+        clientPeer?.lastReceivedAt = System.currentTimeMillis()
         when (frame.first) {
             "SYNC_BEGIN" -> remoteClients.clear()
             "CLIENT" -> snapshotFrom(frame.second)?.let { remoteClients[it.clientId] = it }
@@ -462,37 +488,48 @@ class LocalPartyTransport(
             "PREPARE" -> {
                 val attemptId = frame.second.getOrNull(0) ?: return
                 val serverKey = frame.second.getOrNull(1).orEmpty()
-                onPrepare(attemptId, serverKey)
+                callbacks.onPrepare(attemptId, serverKey)
             }
+
             "PROMOTE" -> {
-                frame.second.getOrNull(0)?.let(onPromoteRequest)
+                frame.second.getOrNull(0)?.let(callbacks.onPromoteRequest)
             }
+
             "PROMOTE_COMMIT" -> {
                 promoteRequested = true
                 clientPeer?.close()
             }
+
             "PROMOTE_WAIT" -> {
                 forceClientUntil = System.currentTimeMillis() + HANDOFF_CLIENT_WAIT_MS
                 clientPeer?.close()
             }
+
             "JOIN_GO" -> {
                 val attemptId = frame.second.getOrNull(0) ?: return
                 val command = frame.second.getOrNull(1) ?: "dchien"
-                val gamemodeSlot = frame.second.getOrNull(2)?.toIntOrNull() ?: return
-                val difficultySlot = frame.second.getOrNull(3)?.toIntOrNull() ?: return
-                onJoinGo(attemptId, command, gamemodeSlot, difficultySlot)
+                val typeSlot = frame.second.getOrNull(2)?.toIntOrNull() ?: return
+                val roomSlot = frame.second.getOrNull(3)?.toIntOrNull() ?: return
+                callbacks.onJoinGo(attemptId, command, typeSlot, roomSlot)
             }
+
             "JOIN_CANCEL" -> {
-                frame.second.getOrNull(0)?.let(onJoinCancel)
+                frame.second.getOrNull(0)?.let(callbacks.onJoinCancel)
             }
+
+            "PING" -> clientPeer?.send("PONG")
+            "PONG" -> Unit
+
             "MANUAL_COMMAND" -> {
                 val attemptId = frame.second.getOrNull(0) ?: return
                 val command = frame.second.getOrNull(1) ?: "dchien"
-                onManualCommand(attemptId, command)
+                callbacks.onManualCommand(attemptId, command)
             }
+
             "PARTY_COMMAND" -> {
-                frame.second.getOrNull(0)?.let(onPartyCommand)
+                frame.second.getOrNull(0)?.let(callbacks.onPartyCommand)
             }
+
             "MANUAL_CLICK" -> {
                 val attemptId = frame.second.getOrNull(0) ?: return
                 val sequence = frame.second.getOrNull(1)?.toIntOrNull() ?: return
@@ -502,8 +539,9 @@ class LocalPartyTransport(
                 val intentVersion = frame.second.getOrNull(5)?.toIntOrNull() ?: 0
                 val type = frame.second.getOrNull(6) ?: "SELECT_TYPE"
                 val targetSignature = frame.second.getOrNull(7).orEmpty()
-                onManualClick(attemptId, sequence, slot, button, action, intentVersion, type, targetSignature)
+                callbacks.onManualClick(attemptId, sequence, slot, button, action, intentVersion, type, targetSignature)
             }
+
             "MANUAL_ROOM_ACCEPTED" -> {
                 val attemptId = frame.second.getOrNull(0) ?: return
                 val sequence = frame.second.getOrNull(1)?.toIntOrNull() ?: return
@@ -513,7 +551,7 @@ class LocalPartyTransport(
                 val intentVersion = frame.second.getOrNull(5)?.toIntOrNull() ?: 0
                 val type = frame.second.getOrNull(6) ?: "SELECT_TYPE"
                 val targetSignature = frame.second.getOrNull(7).orEmpty()
-                onManualRoomAccepted(
+                callbacks.onManualRoomAccepted(
                     attemptId,
                     sequence,
                     slot,
@@ -524,8 +562,34 @@ class LocalPartyTransport(
                     targetSignature
                 )
             }
+
             "MANUAL_REPLAY_BEGIN" -> {
-                frame.second.getOrNull(0)?.let(onManualReplayBegin)
+                frame.second.getOrNull(0)?.let(callbacks.onManualReplayBegin)
+            }
+        }
+    }
+
+    private fun heartbeatLoop() {
+        while (running) {
+            val now = System.currentTimeMillis()
+            if (isCoordinator) {
+                peers.values.toList().forEach { peer ->
+                    if (now - peer.lastReceivedAt > HEARTBEAT_TIMEOUT_MS) {
+                        peer.close()
+                    } else {
+                        runCatching { peer.send("PING") }
+                    }
+                }
+            } else {
+                val peer = clientPeer
+                if (peer != null && now - peer.lastReceivedAt > HEARTBEAT_TIMEOUT_MS) {
+                    peer.close()
+                }
+            }
+            try {
+                Thread.sleep(HEARTBEAT_INTERVAL_MS)
+            } catch (_: InterruptedException) {
+                return
             }
         }
     }
@@ -541,7 +605,7 @@ class LocalPartyTransport(
             isCoordinator = true
             executor.execute { acceptLoop(socket) }
             publishSnapshot()
-            onStatus("primary")
+            callbacks.onStatus("primary")
             true
         } catch (_: BindException) {
             false
@@ -573,12 +637,12 @@ class LocalPartyTransport(
     }
 
     private fun publishSnapshot() {
-        onSnapshot(currentSnapshot())
+        callbacks.onSnapshot(currentSnapshot())
     }
 
     private fun currentSnapshot(): List<PartyClientSnapshot> =
         (listOfNotNull(localSnapshot?.copy(isCoordinator = isCoordinator)) +
-            remoteClients.values.map { it.copy(isCoordinator = it.isCoordinator) })
+                remoteClients.values.map { it.copy(isCoordinator = it.isCoordinator) })
             .distinctBy { it.clientId }
             .sortedBy { it.name.lowercase() }
 

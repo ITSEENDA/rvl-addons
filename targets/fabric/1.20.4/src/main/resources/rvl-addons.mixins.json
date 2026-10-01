@@ -10,6 +10,7 @@
 		"ClientConnectionTraceMixin",
 		"ClientPlayerInteractionManagerPartyMixin",
 		"HandledScreenTraceMixin",
-		"ScreenTraceAccessor"
+		"ScreenTraceAccessor",
+		"ScreenPartyCloseMixin"
 	]
 }

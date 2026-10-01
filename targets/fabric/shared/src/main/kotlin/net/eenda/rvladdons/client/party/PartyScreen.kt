@@ -2,6 +2,7 @@ package net.eenda.rvladdons.client.party
 
 import dev.tako.libs.client.ui.core.TakoScreenChrome
 import dev.tako.libs.client.ui.core.TakoTheme
+import net.eenda.rvladdons.core.RvlAddonsConfigStore
 import net.eenda.rvladdons.feature.party.PartyPresenceState
 import net.minecraft.client.gui.DrawContext
 import net.minecraft.client.gui.screen.Screen
@@ -13,18 +14,23 @@ class PartyScreen(private val parent: Screen?) : Screen(Text.literal("Local Clon
         const val PANEL_X = 24
         const val PANEL_Y = 42
         const val ROW_HEIGHT = 22
+        const val CLIENT_LIST_TOP = PANEL_Y + 92
     }
 
     override fun init() {
         if (LocalPartyController.isCoordinator()) {
+            addDrawableChild(ButtonWidget.builder(Text.literal("Capture Type + Room Slots")) {
+                client?.setScreen(parent)
+                LocalPartyController.startAutomaticSlotCapture()
+            }.dimensions(PANEL_X + 8, PANEL_Y + 42, 184, 20).build())
             addDrawableChild(ButtonWidget.builder(Text.literal("Select eligible")) {
                 client?.let(LocalPartyController::selectAllEligible)
             }.dimensions(24, height - 30, 108, 20).build())
-            addDrawableChild(ButtonWidget.builder(Text.literal("Start draft")) {
-                client?.let(LocalPartyController::startDraft)
+            addDrawableChild(ButtonWidget.builder(Text.literal("Prepare party")) {
+                client?.let(LocalPartyController::startPreparation)
             }.dimensions(138, height - 30, 90, 20).build())
             addDrawableChild(ButtonWidget.builder(Text.literal("Cancel")) {
-                client?.let(LocalPartyController::cancelDraft)
+                client?.let(LocalPartyController::cancelPreparation)
             }.dimensions(234, height - 30, 70, 20).build())
         }
         addDrawableChild(ButtonWidget.builder(Text.literal("Close")) {
@@ -51,10 +57,18 @@ class PartyScreen(private val parent: Screen?) : Screen(Text.literal("Local Clon
             PANEL_Y + 24,
             TakoTheme.TEXT_SECONDARY
         )
+        val config = RvlAddonsConfigStore.config
+        context.drawTextWithShadow(
+            textRenderer,
+            Text.literal("Auto slots: Type #${config.partyAutomaticTypeSlot} / Room #${config.partyAutomaticRoomSlot}"),
+            PANEL_X + 8,
+            PANEL_Y + 34,
+            TakoTheme.TEXT_SECONDARY
+        )
 
         val clients = LocalPartyController.clients()
         clients.forEachIndexed { index, snapshot ->
-            val rowY = PANEL_Y + 44 + index * ROW_HEIGHT
+            val rowY = CLIENT_LIST_TOP + index * ROW_HEIGHT
             val selected = snapshot.selected
             val eligible = LocalPartyController.isEligible(snapshot, minecraft)
             val stateColor = if (eligible) TakoTheme.ACCENT else 0xFFCC8866.toInt()
@@ -82,7 +96,7 @@ class PartyScreen(private val parent: Screen?) : Screen(Text.literal("Local Clon
                 textRenderer,
                 Text.literal(if (coordinator) "No local clients connected yet." else "Waiting for other party clients..."),
                 PANEL_X + 12,
-                PANEL_Y + 54,
+                CLIENT_LIST_TOP + 10,
                 TakoTheme.TEXT_SECONDARY
             )
         }
@@ -91,7 +105,7 @@ class PartyScreen(private val parent: Screen?) : Screen(Text.literal("Local Clon
     override fun mouseClicked(mouseX: Double, mouseY: Double, button: Int): Boolean {
         if (super.mouseClicked(mouseX, mouseY, button)) return true
         if (button != 0 || mouseX < PANEL_X || mouseX > width - 24) return false
-        val index = ((mouseY - (PANEL_Y + 44)) / ROW_HEIGHT).toInt()
+        val index = ((mouseY - CLIENT_LIST_TOP) / ROW_HEIGHT).toInt()
         val snapshot = LocalPartyController.clients().getOrNull(index) ?: return false
         val minecraft = client ?: return false
         if (!LocalPartyController.isCoordinator()) return true

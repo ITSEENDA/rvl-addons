@@ -23,6 +23,9 @@ data class RvlAddonsConfig(
     var hudParty: HudLayout = HudLayout(offsetY = 94),
     var autoRevive: AutoReviveConfig = AutoReviveConfig(),
     var partyJoinExecutionMode: PartyJoinExecutionMode = PartyJoinExecutionMode.MANUAL,
+    var partyAutomaticTypeSlot: Int = 11,
+    var partyAutomaticRoomSlot: Int = 11,
+    var partyMenuSettleDelayMs: Int = 1_000,
     var partyDebugToasts: Boolean = true,
     var comaSwapServerSync: Boolean = true,
     var comaTiming: ComaTimingConfig = ComaTimingConfig(),
@@ -116,6 +119,12 @@ object RvlAddonsConfigStore {
             partyJoinExecutionMode = runCatching {
                 PartyJoinExecutionMode.valueOf(properties.getProperty("party.join.mode").orEmpty())
             }.getOrDefault(PartyJoinExecutionMode.MANUAL),
+            partyAutomaticTypeSlot = properties.getProperty("party.auto.typeSlot")
+                ?.toIntOrNull()?.coerceIn(0, 53) ?: 11,
+            partyAutomaticRoomSlot = properties.getProperty("party.auto.roomSlot")
+                ?.toIntOrNull()?.coerceIn(0, 53) ?: 11,
+            partyMenuSettleDelayMs = properties.getProperty("party.menu.settleDelayMs")
+                ?.toIntOrNull()?.coerceIn(0, 5000) ?: 1_000,
             partyDebugToasts = properties.getProperty("party.debug.toasts")?.toBooleanStrictOrNull() ?: true,
             comaSwapServerSync = properties.getProperty("coma.swap.serverSync")?.toBooleanStrictOrNull() ?: true,
             comaTiming = ComaTimingConfig(
@@ -169,6 +178,9 @@ object RvlAddonsConfigStore {
         properties["revive.sound.enabled"] = config.autoRevive.soundEnabled.toString()
         properties["revive.sound.volume"] = config.autoRevive.soundVolume.toString()
         properties["party.join.mode"] = config.partyJoinExecutionMode.name
+        properties["party.auto.typeSlot"] = config.partyAutomaticTypeSlot.toString()
+        properties["party.auto.roomSlot"] = config.partyAutomaticRoomSlot.toString()
+        properties["party.menu.settleDelayMs"] = config.partyMenuSettleDelayMs.toString()
         properties["party.debug.toasts"] = config.partyDebugToasts.toString()
         properties["coma.swap.serverSync"] = config.comaSwapServerSync.toString()
         properties["coma.timing.openMs"] = config.comaTiming.openMs.toString()

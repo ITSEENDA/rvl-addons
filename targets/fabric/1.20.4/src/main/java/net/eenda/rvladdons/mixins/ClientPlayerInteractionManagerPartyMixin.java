@@ -11,7 +11,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(ClientPlayerInteractionManager.class)
 public abstract class ClientPlayerInteractionManagerPartyMixin {
-    @Inject(method = "clickSlot", at = @At("HEAD"))
+    @Inject(method = "clickSlot", at = @At("HEAD"), cancellable = true)
     private void rvladdons$partyClick(
         int syncId,
         int slotId,
@@ -20,6 +20,8 @@ public abstract class ClientPlayerInteractionManagerPartyMixin {
         PlayerEntity player,
         CallbackInfo info
     ) {
-        LocalPartyController.INSTANCE.onLocalSlotAction(syncId, slotId, button, actionType);
+        if (LocalPartyController.INSTANCE.onLocalSlotAction(syncId, slotId, button, actionType)) {
+            info.cancel();
+        }
     }
 }

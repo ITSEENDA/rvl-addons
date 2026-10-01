@@ -173,6 +173,18 @@ object RvlAddonsConfigScreen {
                             .controller { BooleanControllerBuilder.create(it).coloured(true).onOffFormatter() }
                             .build()
                     )
+                    .option(
+                        Option.createBuilder<Int>()
+                            .name(Text.literal("Menu settle delay (ms)"))
+                            .description(OptionDescription.of(Text.literal("Delay after a menu refresh before replaying type or room actions.")))
+                            .binding(
+                                config.partyMenuSettleDelayMs,
+                                { config.partyMenuSettleDelayMs },
+                                { config.partyMenuSettleDelayMs = it.coerceIn(0, 5000) }
+                            )
+                            .controller { IntegerFieldControllerBuilder.create(it).range(0, 5000) }
+                            .build()
+                    )
                     .build()
             )
             .group(
