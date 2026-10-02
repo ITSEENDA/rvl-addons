@@ -111,8 +111,8 @@ object RvlAddonsClient : ClientModInitializer {
             RvlAddonsTrace.log("command-out", command)
         }
 
-        ClientReceiveMessageEvents.GAME.register { message, overlay ->
-            if (!overlay) LocalPartyController.handleJoinChat(message.string)
+        ClientReceiveMessageEvents.GAME.register { message, _ ->
+            LocalPartyController.handleJoinChat(message.string)
         }
 
         ClientPlayConnectionEvents.JOIN.register { _, _, client ->
@@ -166,6 +166,7 @@ object RvlAddonsClient : ClientModInitializer {
     }
 
     private fun setGameplayServerActive(active: Boolean) {
+        val wasActive = GameplayServerState.isActive()
         if (lastReportedState != active) {
             logger.info("Gameplay server active: {}", active)
             RvlAddonsTrace.log("state", "gameplayServerActive=$active")
@@ -176,6 +177,8 @@ object RvlAddonsClient : ClientModInitializer {
             lastReportedState = active
         }
         GameplayServerState.update(active)
+        if (active && !wasActive) LocalPartyController.onGameplayServerDetected()
+        if (!active && wasActive) LocalPartyController.onGameplayServerLeft()
     }
 
     private fun toggleMod() {

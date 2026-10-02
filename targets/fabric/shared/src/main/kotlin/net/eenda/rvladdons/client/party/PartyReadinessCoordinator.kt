@@ -20,6 +20,7 @@ internal class PartyReadinessCoordinator(
     private val notReadyReasons = ConcurrentHashMap<String, String>()
     private var phase = PartyAttemptState.IDLE
     private var deadline = 0L
+    private var remoteAttemptId = ""
 
     var attemptId: String = ""
         private set
@@ -55,7 +56,26 @@ internal class PartyReadinessCoordinator(
         val ready = client.world != null &&
                 client.player != null &&
                 currentServerKey(client) == expectedServerKey
+        remoteAttemptId = attemptId
         transport()?.sendReady(attemptId, ready, if (ready) "" else "not on target server")
+    }
+
+    fun cancelAttempt(attemptId: String): Boolean {
+        if (attemptId.isBlank()) return false
+        if (this.attemptId == attemptId) {
+            clear()
+            return true
+        }
+        if (remoteAttemptId == attemptId) {
+            remoteAttemptId = ""
+            return true
+        }
+        return false
+    }
+
+    fun resumeReady() {
+        if (attemptId.isNotBlank()) phase = PartyAttemptState.READY
+        remoteAttemptId = ""
     }
 
     fun handleReadyResponse(
@@ -99,6 +119,7 @@ internal class PartyReadinessCoordinator(
 
     fun clear() {
         attemptId = ""
+        remoteAttemptId = ""
         participantIds = emptySet()
         readyClientIds.clear()
         notReadyReasons.clear()

@@ -23,6 +23,12 @@ object RvlAddonsHudRenderer {
     private const val COOLDOWN_HEIGHT = 34
     private const val COMA_ITEM_SIZE = 18
     private const val COMA_ITEM_GAP = 2
+    private val PARTY_PREVIEW_LINES = listOf(
+        "Role" to "PRIMARY",
+        "State" to "READY",
+        "Doan chien ticket(s)" to "9999",
+        "Thanh lan ticket(s)" to "9999"
+    )
 
     fun register() {
         HudRenderCallback.EVENT.register { context, _ ->
@@ -136,11 +142,25 @@ object RvlAddonsHudRenderer {
     }
 
     private fun drawParty(context: DrawContext, client: MinecraftClient) {
-        val text = LocalPartyController.statusText().ifBlank { "Party 1/2 | Ready 1/2 | PREPARING" }
-        val width = client.textRenderer.getWidth(text) + 12
-        val height = client.textRenderer.fontHeight + 8
+        val lines = LocalPartyController.partyHudLines().ifEmpty { PARTY_PREVIEW_LINES }
+        val labelWidth = lines.maxOf { client.textRenderer.getWidth(it.first) }
+        val valueWidth = lines.maxOf { client.textRenderer.getWidth(it.second) }
+        val lineHeight = client.textRenderer.fontHeight + 2
+        val width = labelWidth + valueWidth + 22
+        val height = lineHeight * (lines.size + 1) + 8
         context.fill(0, 0, width, height, 0xAA101010.toInt())
-        context.drawTextWithShadow(client.textRenderer, Text.literal(text), 6, 4, 0xFF66CCFF.toInt())
+        context.drawTextWithShadow(client.textRenderer, Text.literal("PARTY"), 6, 4, 0xFF66CCFF.toInt())
+        lines.forEachIndexed { index, (label, value) ->
+            val y = 4 + lineHeight * (index + 1)
+            context.drawTextWithShadow(client.textRenderer, Text.literal(label), 6, y, 0xFFAAAAAA.toInt())
+            context.drawTextWithShadow(
+                client.textRenderer,
+                Text.literal(value),
+                12 + labelWidth,
+                y,
+                0xFFFFFFFF.toInt()
+            )
+        }
     }
 
     private fun baseSize(client: MinecraftClient, component: HudComponent): Pair<Int, Int> = when (component) {
@@ -159,8 +179,10 @@ object RvlAddonsHudRenderer {
                 (client.textRenderer.fontHeight + COMA_ITEM_SIZE + 2)
         }
         HudComponent.PARTY -> {
-            val text = LocalPartyController.statusText().ifBlank { "Party 1/2 | Ready 1/2 | PREPARING" }
-            (client.textRenderer.getWidth(text) + 12) to (client.textRenderer.fontHeight + 8)
+            val lines = LocalPartyController.partyHudLines().ifEmpty { PARTY_PREVIEW_LINES }
+            val labelWidth = lines.maxOf { client.textRenderer.getWidth(it.first) }
+            val valueWidth = lines.maxOf { client.textRenderer.getWidth(it.second) }
+            (labelWidth + valueWidth + 22) to ((client.textRenderer.fontHeight + 2) * (lines.size + 1) + 8)
         }
     }
 

@@ -43,6 +43,9 @@ internal class PartyMenuDetector(private val client: () -> MinecraftClient?) {
     fun hasMenuItem(slot: Int): Boolean =
         menuSlots(handler()).getOrNull(slot)?.stack?.isEmpty == false
 
+    fun menuStack(slot: Int): ItemStack? =
+        menuSlots(handler()).getOrNull(slot)?.stack?.takeUnless { it.isEmpty }
+
     fun findMenuItem(signature: String, fallback: Int): Int {
         if (signature.isBlank()) return fallback
         return menuSlots(handler()).indexOfFirst {

@@ -40,8 +40,19 @@ data class PartyClientSnapshot(
     val isCoordinator: Boolean = false,
     val partyState: PartyAttemptState = PartyAttemptState.IDLE,
     val partySelectedCount: Int = 0,
-    val partyReadyCount: Int = 0
-)
+    val partyReadyCount: Int = 0,
+    val dchienRunsRemaining: Int? = null,
+    val tlTicketsRemaining: Int? = null,
+    val dchienRoomName: String = "",
+    val tlRoomName: String = ""
+) {
+    fun runsRemaining(commandRoot: String): Int? =
+        if (commandRoot.trim().removePrefix("/").substringBefore(' ').equals("tl", ignoreCase = true)) {
+            tlTicketsRemaining
+        } else {
+            dchienRunsRemaining
+        }
+}
 
 data class PartyManualAction(
     val sequence: Int,

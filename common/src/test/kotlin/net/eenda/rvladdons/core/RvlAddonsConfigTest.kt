@@ -58,6 +58,49 @@ class RvlAddonsConfigTest {
         )
     }
 
+    @Test
+    fun capturedPartyRoomNamesPersist() {
+        val directory = Files.createTempDirectory("rvl-party-rooms")
+        val configPath = directory.resolve("rvl-addons.properties")
+        try {
+            RvlAddonsConfigStore.load(configPath)
+            RvlAddonsConfigStore.config.partyAutomaticRoomName = "Dchien Trial"
+            RvlAddonsConfigStore.config.partyTlAutomaticRoomName = "Thanh Lan Trial"
+            RvlAddonsConfigStore.save()
+            RvlAddonsConfigStore.load(configPath)
+
+            assertEquals("Dchien Trial", RvlAddonsConfigStore.config.partyAutomaticRoomName)
+            assertEquals("Thanh Lan Trial", RvlAddonsConfigStore.config.partyTlAutomaticRoomName)
+        } finally {
+            directory.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun partyLoopDelaysHaveCommandSpecificMinimumsAndPersist() {
+        val directory = Files.createTempDirectory("rvl-party-loop-delay")
+        val configPath = directory.resolve("rvl-addons.properties")
+        try {
+            val properties = Properties().apply {
+                setProperty("party.auto.loopDelaySeconds", "5")
+                setProperty("party.auto.dchienLoopDelaySeconds", "2")
+            }
+            Files.newOutputStream(configPath).use { properties.store(it, null) }
+            RvlAddonsConfigStore.load(configPath)
+            assertEquals(3, RvlAddonsConfigStore.config.partyDchienLoopDelaySeconds)
+            assertEquals(10, RvlAddonsConfigStore.config.partyTlLoopDelaySeconds)
+
+            RvlAddonsConfigStore.config.partyDchienLoopDelaySeconds = 7
+            RvlAddonsConfigStore.config.partyTlLoopDelaySeconds = 22
+            RvlAddonsConfigStore.save()
+            RvlAddonsConfigStore.load(configPath)
+            assertEquals(7, RvlAddonsConfigStore.config.partyDchienLoopDelaySeconds)
+            assertEquals(22, RvlAddonsConfigStore.config.partyTlLoopDelaySeconds)
+        } finally {
+            directory.toFile().deleteRecursively()
+        }
+    }
+
     private fun loadProperties(path: java.nio.file.Path): Properties = Properties().also { properties ->
         Files.newInputStream(path).use(properties::load)
     }

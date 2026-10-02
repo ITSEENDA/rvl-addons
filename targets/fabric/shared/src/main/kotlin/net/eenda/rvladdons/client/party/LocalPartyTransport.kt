@@ -33,7 +33,8 @@ internal data class PartyTransportCallbacks(
     val onSnapshot: (List<PartyClientSnapshot>) -> Unit,
     val onPrepare: (String, String) -> Unit,
     val onReady: (String, String, Boolean, String) -> Unit,
-    val onPromoteRequest: (String) -> Unit,
+    val onPromoteRequest: (String, Boolean) -> Unit,
+    val onPromotionCommitted: (Set<String>) -> Unit,
     val onPromotionReady: (String, String, Boolean, String) -> Unit,
     val onJoinGo: (String, String, Int, Int) -> Unit,
     val onJoinResult: (String, String, Boolean, String) -> Unit,
@@ -42,11 +43,11 @@ internal data class PartyTransportCallbacks(
     val onManualMenuReady: (String, String) -> Unit,
     val onManualMenuState: (String, String, PartyMenuStage, Int) -> Unit,
     val onManualClick: (String, Int, Int, Int, String, Int, String, String) -> Unit,
-    val onManualRoomAccepted: (String, Int, Int, Int, String, Int, String, String) -> Unit,
+    val onManualRoomAccepted: (String, Int, Int, Int, String, Int, String, String, Int?) -> Unit,
     val onManualReplayBegin: (String) -> Unit,
     val onManualAck: (String, String, Int) -> Unit,
     val onManualResync: (String, String, Int) -> Unit,
-    val onJoinCancel: (String) -> Unit,
+    val onJoinCancel: (String, Boolean) -> Unit,
     val onJoinCancelRequest: (String, String) -> Unit,
     val onStatus: (String) -> Unit
 )
@@ -164,11 +165,11 @@ internal class LocalPartyTransport(
         clientPeer?.send("JOIN_RESULT", listOf(attemptId, success.toString(), reason))
     }
 
-    fun sendJoinCancel(clientIds: Set<String>, attemptId: String) {
+    fun sendJoinCancel(clientIds: Set<String>, attemptId: String, keepReady: Boolean) {
         if (!isCoordinator) return
         clientIds.forEach { clientId ->
             peers[clientId]?.let { peer ->
-                runCatching { peer.send("JOIN_CANCEL", listOf(attemptId)) }
+                runCatching { peer.send("JOIN_CANCEL", listOf(attemptId, keepReady.toString())) }
             }
         }
     }
@@ -245,7 +246,8 @@ internal class LocalPartyTransport(
     fun sendManualRoomAccepted(
         clientIds: Set<String>,
         attemptId: String,
-        action: PartyManualAction
+        action: PartyManualAction,
+        allowanceCost: Int?
     ) {
         if (!isCoordinator) return
         clientIds.forEach { clientId ->
@@ -261,7 +263,8 @@ internal class LocalPartyTransport(
                             action.action,
                             action.intentVersion.toString(),
                             action.type.name,
-                            action.targetSignature
+                            action.targetSignature,
+                            allowanceCost?.toString() ?: "0"
                         )
                     )
                 }
@@ -297,10 +300,10 @@ internal class LocalPartyTransport(
         }
     }
 
-    fun requestPromotion(clientId: String, handoffId: String): Boolean {
+    fun requestPromotion(clientId: String, handoffId: String, allowReady: Boolean = false): Boolean {
         if (!isCoordinator) return false
         val peer = peers[clientId] ?: return false
-        runCatching { peer.send("PROMOTE", listOf(handoffId)) }.getOrElse { return false }
+        runCatching { peer.send("PROMOTE", listOf(handoffId, allowReady.toString())) }.getOrElse { return false }
         return true
     }
 
@@ -309,12 +312,12 @@ internal class LocalPartyTransport(
         clientPeer?.send("PROMOTION_READY", listOf(handoffId, ready.toString(), reason))
     }
 
-    fun commitPromotion(clientId: String, handoffId: String): Boolean {
+    fun commitPromotion(clientId: String, handoffId: String, selectedClientIds: Set<String>): Boolean {
         if (!isCoordinator || !peers.containsKey(clientId)) return false
         peers.forEach { (peerId, peer) ->
             runCatching {
                 if (peerId == clientId) {
-                    peer.send("PROMOTE_COMMIT", listOf(handoffId))
+                    peer.send("PROMOTE_COMMIT", listOf(handoffId) + selectedClientIds)
                 } else {
                     peer.send("PROMOTE_WAIT", listOf(handoffId, clientId))
                 }
@@ -492,10 +495,13 @@ internal class LocalPartyTransport(
             }
 
             "PROMOTE" -> {
-                frame.second.getOrNull(0)?.let(callbacks.onPromoteRequest)
+                val handoffId = frame.second.getOrNull(0) ?: return
+                val allowReady = frame.second.getOrNull(1)?.toBooleanStrictOrNull() ?: false
+                callbacks.onPromoteRequest(handoffId, allowReady)
             }
 
             "PROMOTE_COMMIT" -> {
+                callbacks.onPromotionCommitted(frame.second.drop(1).toSet())
                 promoteRequested = true
                 clientPeer?.close()
             }
@@ -514,7 +520,9 @@ internal class LocalPartyTransport(
             }
 
             "JOIN_CANCEL" -> {
-                frame.second.getOrNull(0)?.let(callbacks.onJoinCancel)
+                val attemptId = frame.second.getOrNull(0) ?: return
+                val keepReady = frame.second.getOrNull(1)?.toBooleanStrictOrNull() ?: true
+                callbacks.onJoinCancel(attemptId, keepReady)
             }
 
             "PING" -> clientPeer?.send("PONG")
@@ -551,6 +559,7 @@ internal class LocalPartyTransport(
                 val intentVersion = frame.second.getOrNull(5)?.toIntOrNull() ?: 0
                 val type = frame.second.getOrNull(6) ?: "SELECT_TYPE"
                 val targetSignature = frame.second.getOrNull(7).orEmpty()
+                val allowanceCost = frame.second.getOrNull(8)?.toIntOrNull()?.takeIf { it > 0 }
                 callbacks.onManualRoomAccepted(
                     attemptId,
                     sequence,
@@ -559,7 +568,8 @@ internal class LocalPartyTransport(
                     action,
                     intentVersion,
                     type,
-                    targetSignature
+                    targetSignature,
+                    allowanceCost
                 )
             }
 
@@ -656,7 +666,11 @@ internal class LocalPartyTransport(
         snapshot.isCoordinator.toString(),
         snapshot.partyState.name,
         snapshot.partySelectedCount.toString(),
-        snapshot.partyReadyCount.toString()
+        snapshot.partyReadyCount.toString(),
+        snapshot.dchienRunsRemaining?.toString() ?: "",
+        snapshot.tlTicketsRemaining?.toString() ?: "",
+        snapshot.dchienRoomName,
+        snapshot.tlRoomName
     )
 
     private fun snapshotFrom(fields: List<String>): PartyClientSnapshot? {
@@ -674,7 +688,11 @@ internal class LocalPartyTransport(
                 ?.let { runCatching { net.eenda.rvladdons.feature.party.PartyAttemptState.valueOf(it) }.getOrNull() }
                 ?: net.eenda.rvladdons.feature.party.PartyAttemptState.IDLE,
             partySelectedCount = fields.getOrNull(8)?.toIntOrNull() ?: 0,
-            partyReadyCount = fields.getOrNull(9)?.toIntOrNull() ?: 0
+            partyReadyCount = fields.getOrNull(9)?.toIntOrNull() ?: 0,
+            dchienRunsRemaining = fields.getOrNull(10)?.toIntOrNull(),
+            tlTicketsRemaining = fields.getOrNull(11)?.toIntOrNull(),
+            dchienRoomName = fields.getOrNull(12).orEmpty(),
+            tlRoomName = fields.getOrNull(13).orEmpty()
         )
     }
 }

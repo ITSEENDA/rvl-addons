@@ -27,7 +27,15 @@ object PartyJoinExecutor {
         val baselineZ: Double,
         var menuSyncId: Int = -1,
         var sawMenuClose: Boolean = false,
+        var typeSubmitted: Boolean = false,
+        var typeX: Double = 0.0,
+        var typeY: Double = 0.0,
+        var typeZ: Double = 0.0,
         var roomSubmitted: Boolean = false,
+        var submittedX: Double = 0.0,
+        var submittedY: Double = 0.0,
+        var submittedZ: Double = 0.0,
+        var allowanceCost: PartyAllowanceCost? = null,
         var deadline: Long = 0L
     )
 
@@ -57,7 +65,7 @@ object PartyJoinExecutor {
     private var run: JoinRun? = null
     private var failureReason: String? = null
     private var successRequested = false
-    private var result: ((Boolean, String) -> Unit)? = null
+    private var result: ((Boolean, String, PartyAllowanceCost?) -> Unit)? = null
     private var dispatchingCommand = false
     private var manualMode = false
     private val manualPendingActions = ArrayDeque<PendingManualAction>()
@@ -101,6 +109,9 @@ object PartyJoinExecutor {
         stateMachine.addTransitionFrom(manualTypeMenuState, waitingRoomState) {
             manualMenuStage == PartyMenuStage.ROOM_MENU && failureReason == null
         }
+        stateMachine.addTransitionFrom(waitingRoomState, completedState) {
+            successRequested && failureReason == null
+        }
         stateMachine.addTransitionFrom(waitingRoomState, manualTypeMenuState) {
             manualMenuStage == PartyMenuStage.TYPE_MENU && failureReason == null
         }
@@ -126,13 +137,13 @@ object PartyJoinExecutor {
         stateMachine.addTransitionFrom(failedState, idleState) { run == null }
     }
 
-    fun start(
+    internal fun start(
         client: MinecraftClient,
         attemptId: String,
         command: String,
         typeSlot: Int,
         roomSlot: Int,
-        onResult: (Boolean, String) -> Unit
+        onResult: (Boolean, String, PartyAllowanceCost?) -> Unit
     ) {
         startInternal(
             client,
@@ -145,7 +156,7 @@ object PartyJoinExecutor {
         )
     }
 
-    fun startManual(
+    internal fun startManual(
         client: MinecraftClient,
         attemptId: String,
         command: String,
@@ -154,7 +165,7 @@ object PartyJoinExecutor {
         onMenuStage: (PartyMenuStage, Int) -> Unit,
         onResyncRequested: (Int) -> Unit,
         onPhase: (String) -> Unit,
-        onResult: (Boolean, String) -> Unit
+        onResult: (Boolean, String, PartyAllowanceCost?) -> Unit
     ) {
         startInternal(
             client,
@@ -184,14 +195,14 @@ object PartyJoinExecutor {
         onMenuStage: (PartyMenuStage, Int) -> Unit = { _, _ -> },
         onResyncRequested: (Int) -> Unit = {},
         onPhase: (String) -> Unit = {},
-        onResult: (Boolean, String) -> Unit
+        onResult: (Boolean, String, PartyAllowanceCost?) -> Unit
     ) {
         if (run != null) {
-            onResult(false, "join executor busy")
+            onResult(false, "join executor busy", null)
             return
         }
         val player = client.player ?: run {
-            onResult(false, "player unavailable")
+            onResult(false, "player unavailable", null)
             return
         }
         this.client = client
@@ -330,7 +341,30 @@ object PartyJoinExecutor {
     }
 
     internal fun markRoomSubmitted() {
-        currentRun()?.roomSubmitted = true
+        val currentRun = run ?: return
+        if (currentRun.roomSubmitted) return
+        currentRun.roomSubmitted = true
+        val currentClient = client ?: return
+        val currentPlayer = currentClient.player ?: return
+        currentRun.submittedX = currentPlayer.x
+        currentRun.submittedY = currentPlayer.y
+        currentRun.submittedZ = currentPlayer.z
+    }
+
+    internal fun captureRoomCost(slot: Int) {
+        val currentRun = run ?: return
+        if (currentRun.allowanceCost != null) return
+        val stack = menuDetector.menuStack(slot) ?: return
+        currentRun.allowanceCost = PartyAllowanceTracker.roomCost(currentRun.command, stack)
+    }
+
+    internal fun receiveRoomCost(amount: Int?) {
+        val currentRun = run ?: return
+        val value = amount?.takeIf { it > 0 } ?: return
+        val root = currentRun.command.trim().substringBefore(' ').lowercase()
+        if (root == "dchien" || root == "tl") {
+            currentRun.allowanceCost = PartyAllowanceCost(root, value)
+        }
     }
 
     internal fun markJoinSuccess() {
@@ -339,15 +373,28 @@ object PartyJoinExecutor {
         debugPhase("join confirmation detected")
     }
 
+    internal fun markTypeSubmitted() {
+        val currentRun = run ?: return
+        if (currentRun.typeSubmitted) return
+        currentRun.typeSubmitted = true
+        val currentPlayer = client?.player ?: return
+        currentRun.typeX = currentPlayer.x
+        currentRun.typeY = currentPlayer.y
+        currentRun.typeZ = currentPlayer.z
+    }
+
     internal fun markServerJoinConfirmed() {
-        if (currentRun()?.roomSubmitted != true) return
+        val currentRun = run ?: return
+        if (!currentRun.typeSubmitted && !currentRun.roomSubmitted) return
         markJoinSuccess()
     }
 
     internal fun detectJoinSuccess(): Boolean {
         val currentRun = run ?: return false
-        if (!currentRun.roomSubmitted) return false
         val currentClient = client ?: return false
+        val canCheckPosition = currentRun.roomSubmitted ||
+                (currentRun.typeSubmitted && currentClient.currentScreen == null)
+        if (!canCheckPosition) return false
         val currentWorld = currentClient.world?.registryKey?.toString()
         if (currentWorld != null && currentWorld != currentRun.baselineWorld) return true
 
@@ -355,7 +402,16 @@ object PartyJoinExecutor {
         val dx = currentPlayer.x - currentRun.baselineX
         val dy = currentPlayer.y - currentRun.baselineY
         val dz = currentPlayer.z - currentRun.baselineZ
-        return dx * dx + dy * dy + dz * dz >= 16.0
+        if (dx * dx + dy * dy + dz * dz >= 16.0) return true
+
+        val referenceX = if (currentRun.roomSubmitted) currentRun.submittedX else currentRun.typeX
+        val referenceY = if (currentRun.roomSubmitted) currentRun.submittedY else currentRun.typeY
+        val referenceZ = if (currentRun.roomSubmitted) currentRun.submittedZ else currentRun.typeZ
+        val dxFromSelection = currentPlayer.x - referenceX
+        val dyFromSelection = currentPlayer.y - referenceY
+        val dzFromSelection = currentPlayer.z - referenceZ
+        return dxFromSelection * dxFromSelection + dyFromSelection * dyFromSelection +
+                dzFromSelection * dzFromSelection >= 1.0
     }
 
     internal fun automaticTypeSlot(fallback: Int): Int {
@@ -494,9 +550,11 @@ object PartyJoinExecutor {
         button: Int,
         action: String,
         intentVersion: Int,
-        targetSignature: String
+        targetSignature: String,
+        allowanceCost: Int?
     ): Boolean {
         if (!isManualModeActive()) return false
+        receiveRoomCost(allowanceCost)
         val slotAction = runCatching { SlotActionType.valueOf(action) }.getOrNull() ?: return false
         if (intentVersion < manualIntentVersion) return false
         manualIntentVersion = maxOf(manualIntentVersion, intentVersion)
@@ -524,6 +582,7 @@ object PartyJoinExecutor {
 
     internal fun observeLocalRoomSelection() {
         if (!isManualModeActive()) return
+        markRoomSubmitted()
         val handler = currentHandler()
         roomSelectionExpected = false
         updateManualMenuStage(PartyMenuStage.ROOM_MENU)
@@ -559,6 +618,7 @@ object PartyJoinExecutor {
         val handler = currentHandler()
         manualIntentVersion = intentVersion
         manualLastActionType = type
+        if (type == PartyManualActionType.SELECT_TYPE) markTypeSubmitted()
         roomSelectionExpected = type == PartyManualActionType.SELECT_TYPE
         manualLastAppliedSequence = sequence
         manualLastClickSyncId = handler?.syncId ?: -1
@@ -651,9 +711,12 @@ object PartyJoinExecutor {
                 manualMenuStage != PartyMenuStage.ROOM_MENU
             ) return
             val targetSlot = resolveManualSlot(pending)
+            if (pending.type == PartyManualActionType.SELECT_ROOM) captureRoomCost(targetSlot)
+            if (pending.type == PartyManualActionType.SELECT_ROOM) markRoomSubmitted()
             if (clickSlotAction(targetSlot, pending.button, pending.action)) {
                 manualPendingActions.removeFirst()
                 manualLastActionType = pending.type
+                if (pending.type == PartyManualActionType.SELECT_TYPE) markTypeSubmitted()
                 manualLastAppliedSequence = pending.sequence
                 manualLastClickSyncId = handler.syncId
                 manualLastHandler = handler
@@ -703,6 +766,7 @@ object PartyJoinExecutor {
     }
 
     internal fun complete(success: Boolean, reason: String = "") {
+        val committedCost = run?.allowanceCost.takeIf { success }
         client?.player?.closeHandledScreen()
         val callback = result
         result = null
@@ -721,7 +785,7 @@ object PartyJoinExecutor {
         manualMenuReadyCallback = {}
         manualResyncCallback = {}
         manualPhaseCallback = {}
-        callback?.invoke(success, reason)
+        callback?.invoke(success, reason, committedCost)
     }
 
     internal fun notifyManualMenuReady() {
@@ -784,6 +848,7 @@ internal class PartyJoinClickTypeState(owner: PartyJoinExecutor) : PartyJoinStat
         if (!owner.canClickType()) return
         if (owner.currentHandler()?.syncId != run.menuSyncId) return
         clicked = owner.clickSlot(owner.automaticTypeSlot(run.typeSlot))
+        if (clicked) owner.markTypeSubmitted()
         if (!clicked) owner.fail("type menu unavailable")
     }
 }
@@ -808,11 +873,19 @@ internal class PartyJoinWaitingRoomState(owner: PartyJoinExecutor) : PartyJoinSt
 
     override fun onUpdate() {
         if (owner.isManualModeActive()) {
+            if (owner.detectJoinSuccess()) {
+                owner.markJoinSuccess()
+                return
+            }
             if (owner.detectManualRoomAccepted()) return
             owner.processManualActions()
             return
         }
         val run = owner.currentRun() ?: return
+        if (owner.detectJoinSuccess()) {
+            owner.markJoinSuccess()
+            return
+        }
         val now = System.currentTimeMillis()
 
         if (now >= run.deadline) {
@@ -858,8 +931,9 @@ internal class PartyJoinClickRoomState(owner: PartyJoinExecutor) : PartyJoinStat
     override fun onUpdate() {
         val run = owner.currentRun() ?: return
         if (!owner.hasMenuItem(run.roomSlot)) return
+        owner.captureRoomCost(run.roomSlot)
+        owner.markRoomSubmitted()
         clicked = owner.clickSlot(run.roomSlot)
-        if (clicked) owner.markRoomSubmitted()
         if (!clicked) owner.fail("room menu unavailable")
     }
 }

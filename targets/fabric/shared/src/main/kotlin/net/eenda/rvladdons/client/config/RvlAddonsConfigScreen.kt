@@ -17,6 +17,7 @@ import net.eenda.rvladdons.core.ModEnabledState
 import net.eenda.rvladdons.core.RvlAddonsConfigStore
 import net.eenda.rvladdons.feature.revive.AutoReviveMode
 import net.eenda.rvladdons.feature.party.PartyJoinExecutionMode
+import net.eenda.rvladdons.feature.party.PartyAutoRunMode
 import net.minecraft.client.MinecraftClient
 import net.minecraft.client.gui.screen.Screen
 import net.minecraft.text.Text
@@ -171,6 +172,38 @@ object RvlAddonsConfigScreen {
                             .description(OptionDescription.of(Text.literal("Show connection, sync and join phase notifications.")))
                             .binding(config.partyDebugToasts, { config.partyDebugToasts }, { config.partyDebugToasts = it })
                             .controller { BooleanControllerBuilder.create(it).coloured(true).onOffFormatter() }
+                            .build()
+                    )
+                    .option(
+                        Option.createBuilder<PartyAutoRunMode>()
+                            .name(Text.literal("Automatic run"))
+                            .description(OptionDescription.of(Text.literal("Once stops after one room. Loop starts the same command again when the room ends; Automatic mode only.")))
+                            .binding(config.partyAutoRunMode, { config.partyAutoRunMode }, { config.partyAutoRunMode = it })
+                            .controller { EnumControllerBuilder.create(it).enumClass(PartyAutoRunMode::class.java) }
+                            .build()
+                    )
+                    .option(
+                        Option.createBuilder<Int>()
+                            .name(Text.literal("Dchien loop delay (s)"))
+                            .description(OptionDescription.of(Text.literal("Wait before the next Dchien run. Minimum 3 seconds.")))
+                            .binding(
+                                config.partyDchienLoopDelaySeconds,
+                                { config.partyDchienLoopDelaySeconds },
+                                { config.partyDchienLoopDelaySeconds = it.coerceAtLeast(3) }
+                            )
+                            .controller { IntegerFieldControllerBuilder.create(it).range(3, Int.MAX_VALUE) }
+                            .build()
+                    )
+                    .option(
+                        Option.createBuilder<Int>()
+                            .name(Text.literal("TL loop delay (s)"))
+                            .description(OptionDescription.of(Text.literal("Wait before the next TL run. Minimum 10 seconds.")))
+                            .binding(
+                                config.partyTlLoopDelaySeconds,
+                                { config.partyTlLoopDelaySeconds },
+                                { config.partyTlLoopDelaySeconds = it.coerceAtLeast(10) }
+                            )
+                            .controller { IntegerFieldControllerBuilder.create(it).range(10, Int.MAX_VALUE) }
                             .build()
                     )
                     .option(

@@ -5,6 +5,7 @@ import net.eenda.rvladdons.feature.coma.ComaTimingConfig
 import net.eenda.rvladdons.feature.revive.AutoReviveConfig
 import net.eenda.rvladdons.feature.revive.AutoReviveMode
 import net.eenda.rvladdons.feature.party.PartyJoinExecutionMode
+import net.eenda.rvladdons.feature.party.PartyAutoRunMode
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.Properties
@@ -23,8 +24,15 @@ data class RvlAddonsConfig(
     var hudParty: HudLayout = HudLayout(offsetY = 94),
     var autoRevive: AutoReviveConfig = AutoReviveConfig(),
     var partyJoinExecutionMode: PartyJoinExecutionMode = PartyJoinExecutionMode.MANUAL,
+    var partyAutoRunMode: PartyAutoRunMode = PartyAutoRunMode.ONCE,
+    var partyDchienLoopDelaySeconds: Int = 12,
+    var partyTlLoopDelaySeconds: Int = 12,
     var partyAutomaticTypeSlot: Int = 11,
     var partyAutomaticRoomSlot: Int = 11,
+    var partyAutomaticRoomName: String = "",
+    var partyTlAutomaticTypeSlot: Int = 11,
+    var partyTlAutomaticRoomSlot: Int = 11,
+    var partyTlAutomaticRoomName: String = "",
     var partyMenuSettleDelayMs: Int = 1_000,
     var partyDebugToasts: Boolean = true,
     var comaSwapServerSync: Boolean = true,
@@ -48,6 +56,7 @@ object RvlAddonsConfigStore {
         }
 
         val accountProperties = accountComaProfilePath?.takeIf(Files::exists)?.let(::loadProperties)
+        val legacyLoopDelaySeconds = properties.getProperty("party.auto.loopDelaySeconds")?.toIntOrNull()
         val comaSets = readComaSets(accountProperties ?: properties)
         val hasLegacyComaSets = accountProperties == null && properties.keys.any {
             it.toString().startsWith("coma.set.")
@@ -119,10 +128,25 @@ object RvlAddonsConfigStore {
             partyJoinExecutionMode = runCatching {
                 PartyJoinExecutionMode.valueOf(properties.getProperty("party.join.mode").orEmpty())
             }.getOrDefault(PartyJoinExecutionMode.MANUAL),
+            partyAutoRunMode = runCatching {
+                PartyAutoRunMode.valueOf(properties.getProperty("party.auto.runMode").orEmpty())
+            }.getOrDefault(PartyAutoRunMode.ONCE),
+            partyDchienLoopDelaySeconds = properties.getProperty("party.auto.dchienLoopDelaySeconds")
+                ?.toIntOrNull()?.coerceAtLeast(3) ?: legacyLoopDelaySeconds?.coerceAtLeast(3) ?: 12,
+            partyTlLoopDelaySeconds = properties.getProperty("party.auto.tlLoopDelaySeconds")
+                ?.toIntOrNull()?.coerceAtLeast(10) ?: legacyLoopDelaySeconds?.coerceAtLeast(10) ?: 12,
             partyAutomaticTypeSlot = properties.getProperty("party.auto.typeSlot")
                 ?.toIntOrNull()?.coerceIn(0, 53) ?: 11,
             partyAutomaticRoomSlot = properties.getProperty("party.auto.roomSlot")
                 ?.toIntOrNull()?.coerceIn(0, 53) ?: 11,
+            partyAutomaticRoomName = properties.getProperty("party.auto.roomName").orEmpty(),
+            partyTlAutomaticTypeSlot = properties.getProperty("party.auto.tl.typeSlot")
+                ?.toIntOrNull()?.coerceIn(0, 53)
+                ?: properties.getProperty("party.auto.typeSlot")?.toIntOrNull()?.coerceIn(0, 53) ?: 11,
+            partyTlAutomaticRoomSlot = properties.getProperty("party.auto.tl.roomSlot")
+                ?.toIntOrNull()?.coerceIn(0, 53)
+                ?: properties.getProperty("party.auto.roomSlot")?.toIntOrNull()?.coerceIn(0, 53) ?: 11,
+            partyTlAutomaticRoomName = properties.getProperty("party.auto.tl.roomName").orEmpty(),
             partyMenuSettleDelayMs = properties.getProperty("party.menu.settleDelayMs")
                 ?.toIntOrNull()?.coerceIn(0, 5000) ?: 1_000,
             partyDebugToasts = properties.getProperty("party.debug.toasts")?.toBooleanStrictOrNull() ?: true,
@@ -178,8 +202,15 @@ object RvlAddonsConfigStore {
         properties["revive.sound.enabled"] = config.autoRevive.soundEnabled.toString()
         properties["revive.sound.volume"] = config.autoRevive.soundVolume.toString()
         properties["party.join.mode"] = config.partyJoinExecutionMode.name
+        properties["party.auto.runMode"] = config.partyAutoRunMode.name
+        properties["party.auto.dchienLoopDelaySeconds"] = config.partyDchienLoopDelaySeconds.coerceAtLeast(3).toString()
+        properties["party.auto.tlLoopDelaySeconds"] = config.partyTlLoopDelaySeconds.coerceAtLeast(10).toString()
         properties["party.auto.typeSlot"] = config.partyAutomaticTypeSlot.toString()
         properties["party.auto.roomSlot"] = config.partyAutomaticRoomSlot.toString()
+        properties["party.auto.roomName"] = config.partyAutomaticRoomName
+        properties["party.auto.tl.typeSlot"] = config.partyTlAutomaticTypeSlot.toString()
+        properties["party.auto.tl.roomSlot"] = config.partyTlAutomaticRoomSlot.toString()
+        properties["party.auto.tl.roomName"] = config.partyTlAutomaticRoomName
         properties["party.menu.settleDelayMs"] = config.partyMenuSettleDelayMs.toString()
         properties["party.debug.toasts"] = config.partyDebugToasts.toString()
         properties["coma.swap.serverSync"] = config.comaSwapServerSync.toString()

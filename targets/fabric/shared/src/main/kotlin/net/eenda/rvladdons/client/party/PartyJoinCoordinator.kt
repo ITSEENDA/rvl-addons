@@ -3,6 +3,7 @@ package net.eenda.rvladdons.client.party
 import net.eenda.rvladdons.core.RvlAddonsConfigStore
 import net.eenda.rvladdons.core.RvlTextMatcher
 import net.eenda.rvladdons.feature.party.PartyAttemptState
+import net.eenda.rvladdons.feature.party.PartyAutoRunMode
 import net.eenda.rvladdons.feature.party.PartyJoinExecutionMode
 import net.eenda.rvladdons.feature.party.PartyManualActionType
 import net.eenda.rvladdons.feature.party.PartyMenuStage
@@ -16,11 +17,18 @@ internal class PartyJoinCoordinator(
     private val clientId: () -> String,
     private val isCoordinator: () -> Boolean,
     private val participantIds: () -> Set<String>,
+    private val creatorCandidates: () -> List<RoomCreatorCandidate>,
+    private val creatorRotation: RoomCreatorRotation,
     private val transport: () -> LocalPartyTransport?,
     private val readinessClear: () -> Unit,
+    private val readinessResume: () -> Unit,
     private val readinessPause: () -> Unit,
     private val activePartyClientIds: () -> Set<String>,
     private val setAttemptState: (PartyAttemptState) -> Unit,
+    private val commitAllowance: (PartyAllowanceCost?) -> Unit,
+    private val unselectExhaustedClient: (String, String) -> Unit,
+    private val localRunsRemaining: (String) -> Int?,
+    private val onCoordinatorExhausted: (String) -> Unit,
     private val debugToast: (String) -> Unit
 ) {
     companion object {
@@ -29,7 +37,14 @@ internal class PartyJoinCoordinator(
 
     val session = PartyJoinSession()
     val history = PartyActionHistory()
+    private var activeRoomCreator: RoomCreatorCandidate? = null
+    private val failedCreatorClientIds = HashSet<String>()
+    private var automaticFollowersLaunched = false
+    private var pendingAutomaticCommand: String? = null
+    private var pendingAutomaticStartAt = 0L
+    private var pendingAutomaticExcludedCreators: Set<String> = emptySet()
     private var activeRoomCommandRoot: String? = null
+    private var activeRoomWasAutomatic = false
 
     fun handlePartyCommand(command: String) {
         MinecraftClient.getInstance().execute {
@@ -46,8 +61,20 @@ internal class PartyJoinCoordinator(
     }
 
     fun tick(now: Long) {
+        val pendingCommand = pendingAutomaticCommand
+        if (pendingCommand != null && now >= pendingAutomaticStartAt) {
+            val excludedCreators = pendingAutomaticExcludedCreators
+            pendingAutomaticCommand = null
+            pendingAutomaticStartAt = 0L
+            pendingAutomaticExcludedCreators = emptySet()
+            beginAutomatic(pendingCommand, excludedCreators)
+        }
         if (session.isActive && session.isExpired(now)) {
+            if (isCoordinator() && session.attemptId.isNotBlank()) {
+                transport()?.sendJoinCancel(activePartyClientIds(), session.attemptId, keepReady = true)
+            }
             setAttemptState(PartyAttemptState.READY)
+            readinessResume()
             overlay("Party join timed out")
             clear()
         }
@@ -55,17 +82,62 @@ internal class PartyJoinCoordinator(
 
     fun begin(command: String, mode: PartyJoinExecutionMode) {
         if (mode == PartyJoinExecutionMode.AUTOMATIC) {
+            failedCreatorClientIds.clear()
             beginAutomatic(command)
         } else {
             beginManual(command)
         }
     }
 
-    private fun beginAutomatic(command: String) {
+    private fun beginAutomatic(command: String, excludedCreators: Set<String> = emptySet()) {
+        if (session.isActive) return
+        val commandRoot = command.trim().removePrefix("/").substringBefore(' ').lowercase()
+        failedCreatorClientIds.clear()
+        failedCreatorClientIds.addAll(excludedCreators)
+        val currentCandidates = creatorCandidates()
+        participantIds().toList().forEach { participantId ->
+            if (currentCandidates.firstOrNull { it.clientId == participantId }
+                    ?.remainingFor(commandRoot) == 0
+            ) {
+                unselectExhaustedClient(participantId, commandRoot)
+            }
+        }
+        if (localRunsRemaining(commandRoot) == 0) {
+            onCoordinatorExhausted(commandRoot)
+            return
+        }
+        val participants = participantIds()
+        if (participants.isEmpty()) return
+        val now = System.currentTimeMillis()
+        val partyClientIds = participants + clientId()
+        val selection = creatorRotation.choose(
+            creatorCandidates().filter { it.clientId in partyClientIds },
+            now,
+            excludedCreators,
+            command
+        ) ?: run {
+            overlay("Party: no eligible room creator")
+            return
+        }
+        if (selection.availableAt > now) {
+            pendingAutomaticCommand = command
+            pendingAutomaticStartAt = selection.availableAt
+            pendingAutomaticExcludedCreators = excludedCreators
+            val seconds = ((selection.availableAt - now + 999) / 1000).coerceAtLeast(1)
+            overlay("Party: waiting ${seconds}s for ${selection.candidate.name}'s room cooldown")
+            return
+        }
+
+        startAutomaticWithCreator(command, selection.candidate)
+    }
+
+    private fun startAutomaticWithCreator(command: String, creator: RoomCreatorCandidate) {
         if (session.isActive || participantIds().isEmpty()) return
         val client = MinecraftClient.getInstance()
         val attemptId = UUID.randomUUID().toString()
         val participants = participantIds()
+        activeRoomCreator = creator
+        automaticFollowersLaunched = false
         session.begin(
             attemptId,
             command.lowercase(),
@@ -75,27 +147,130 @@ internal class PartyJoinCoordinator(
         history.reset()
         readinessPause()
         setAttemptState(PartyAttemptState.JOINING)
-        val sent = transport()?.sendJoinGo(
-            participants,
-            attemptId,
-            command,
-            RvlAddonsConfigStore.config.partyAutomaticTypeSlot,
-            RvlAddonsConfigStore.config.partyAutomaticRoomSlot
-        ) ?: 0
-        if (sent != participants.size) {
-            setAttemptState(PartyAttemptState.READY)
-            clear()
-            overlay("Party: JOIN_GO reached $sent/${participants.size} clients")
+        if (creator.clientId == clientId()) {
+            overlay("Party: ${creator.name} is creating the room first")
+            startAutomaticCreator(client, attemptId, command, creator)
             return
         }
-        overlay("Party: JOIN_GO sent to $sent clients")
+
+        if (!sendAutomaticCreatorGo(attemptId, command, creator)) {
+            setAttemptState(PartyAttemptState.READY)
+            readinessResume()
+            clear()
+            overlay("Party: could not start room creator ${creator.name}")
+            return
+        }
+        overlay("Party: ${creator.name} is creating the room first")
+    }
+
+    private fun startAutomaticCreator(
+        client: MinecraftClient,
+        attemptId: String,
+        command: String,
+        creator: RoomCreatorCandidate
+    ) {
+        val slots = automaticSlots(command)
         startLocalJoin(
             client,
             attemptId,
             command,
-            RvlAddonsConfigStore.config.partyAutomaticTypeSlot,
-            RvlAddonsConfigStore.config.partyAutomaticRoomSlot
+            slots.first,
+            slots.second
         )
+    }
+
+    private fun sendAutomaticCreatorGo(
+        attemptId: String,
+        command: String,
+        creator: RoomCreatorCandidate
+    ): Boolean {
+        val slots = automaticSlots(command)
+        val sent = transport()?.sendJoinGo(
+            setOf(creator.clientId),
+            attemptId,
+            command,
+            slots.first,
+            slots.second
+        ) ?: 0
+        return sent == 1
+    }
+
+    private fun startAutomaticFollowers(attemptId: String) {
+        MinecraftClient.getInstance().execute {
+            val creator = activeRoomCreator ?: return@execute
+            if (!isCoordinator() || attemptId != session.attemptId || automaticFollowersLaunched) return@execute
+
+            automaticFollowersLaunched = true
+            creatorRotation.markCreated(creator.accountKey, System.currentTimeMillis())
+            failedCreatorClientIds.clear()
+            val followers = session.expectedClientIds - creator.clientId
+            val localIsFollower = clientId() in followers
+            val peers = followers - clientId()
+            val slots = automaticSlots(session.commandRoot)
+            val sent = if (peers.isEmpty()) 0 else {
+                transport()?.sendJoinGo(
+                    peers,
+                    attemptId,
+                    session.commandRoot,
+                    slots.first,
+                    slots.second
+                ) ?: 0
+            }
+            if (sent != peers.size) {
+                overlay("Party: JOIN_GO reached $sent/${peers.size} followers")
+            }
+
+            if (localIsFollower) {
+                startLocalJoin(
+                    MinecraftClient.getInstance(),
+                    attemptId,
+                    session.commandRoot,
+                    slots.first,
+                    slots.second
+                )
+            }
+            debugToast("Party: creator joined; followers started")
+        }
+    }
+
+    private fun retryAutomaticCreator(attemptId: String): Boolean {
+        val creator = activeRoomCreator ?: return false
+        failedCreatorClientIds.add(creator.clientId)
+        val now = System.currentTimeMillis()
+        val candidates = creatorCandidates().filter { it.clientId in session.expectedClientIds }
+        val selection = creatorRotation.choose(
+            candidates,
+            now,
+            failedCreatorClientIds,
+            session.commandRoot
+        ) ?: return false
+
+        if (selection.availableAt > now) {
+            val command = session.commandRoot
+            val excluded = failedCreatorClientIds.toSet()
+            setAttemptState(PartyAttemptState.READY)
+            readinessResume()
+            clear()
+            pendingAutomaticCommand = command
+            pendingAutomaticStartAt = selection.availableAt
+            pendingAutomaticExcludedCreators = excluded
+            val seconds = ((selection.availableAt - now + 999) / 1000).coerceAtLeast(1)
+            overlay("Party: next creator ${selection.candidate.name} available in ${seconds}s")
+            return true
+        }
+
+        activeRoomCreator = selection.candidate
+        automaticFollowersLaunched = false
+        val attemptId = session.attemptId
+        val command = session.commandRoot
+        val started = if (selection.candidate.clientId == clientId()) {
+            startAutomaticCreator(MinecraftClient.getInstance(), attemptId, command, selection.candidate)
+            true
+        } else {
+            sendAutomaticCreatorGo(attemptId, command, selection.candidate)
+        }
+        if (started) overlay("Party: retrying room creation with ${selection.candidate.name}")
+        return started
     }
 
     fun beginManual(command: String) {
@@ -114,7 +289,9 @@ internal class PartyJoinCoordinator(
         setAttemptState(PartyAttemptState.JOINING)
         val sent = transport()?.sendManualCommand(participants, attemptId, command) ?: 0
         if (sent != participants.size) {
+            transport()?.sendJoinCancel(participants, attemptId, keepReady = true)
             setAttemptState(PartyAttemptState.READY)
+            readinessResume()
             clear()
             overlay("Party: manual command reached $sent/${participants.size} clients")
             return
@@ -232,7 +409,8 @@ internal class PartyJoinCoordinator(
         action: String,
         intentVersion: Int,
         type: String,
-        targetSignature: String
+        targetSignature: String,
+        allowanceCost: Int?
     ) {
         MinecraftClient.getInstance().execute {
             if (attemptId != session.attemptId) return@execute
@@ -242,7 +420,8 @@ internal class PartyJoinCoordinator(
                     button,
                     action,
                     intentVersion,
-                    targetSignature
+                    targetSignature,
+                    allowanceCost
                 )
             ) {
                 debugToast("Party: room accepted; recovery type queued from #$sequence")
@@ -273,11 +452,13 @@ internal class PartyJoinCoordinator(
     fun onLocalSlotAction(slot: Int, button: Int, action: SlotActionType) {
         if (!session.isActive || !isCoordinator() || !PartyJoinExecutor.isManualModeActive()) return
         if (PartyJoinExecutor.isRoomSelectionExpected()) {
+            PartyJoinExecutor.captureRoomCost(slot)
             PartyJoinExecutor.observeLocalRoomSelection()
             return
         }
         val menuStage = PartyJoinExecutor.refreshManualMenuStage() ?: return
         if (menuStage == PartyMenuStage.ROOM_MENU) {
+            PartyJoinExecutor.captureRoomCost(slot)
             PartyJoinExecutor.observeLocalRoomSelection()
             return
         }
@@ -303,10 +484,10 @@ internal class PartyJoinCoordinator(
         debugToast("Party: sent ${type.name} #${manualAction.sequence} slot=$slot")
     }
 
-    fun handleJoinCancel(attemptId: String) {
+    fun handleJoinCancel(attemptId: String, keepReady: Boolean) {
         MinecraftClient.getInstance().execute {
             if (attemptId != session.attemptId) return@execute
-            cancel("dchien quit", false)
+            cancel(if (keepReady) "dchien quit" else "party preparation cancelled", false)
         }
     }
 
@@ -321,8 +502,45 @@ internal class PartyJoinCoordinator(
             session.readyMenuClientIds.remove(clientId)
             session.menuStages.remove(clientId)
 
+            if (activeRoomCreator?.clientId == clientId && !automaticFollowersLaunched && session.isActive) {
+                val candidates = creatorCandidates().filter { it.clientId in participantIds() + this.clientId() }
+                val replacement = creatorRotation.choose(
+                    candidates,
+                    System.currentTimeMillis(),
+                    commandRoot = session.commandRoot
+                )
+                if (replacement == null || replacement.availableAt > System.currentTimeMillis()) {
+                    overlay("Party: room creator left; retry after cooldown")
+                    transport()?.sendJoinCancel(
+                        activePartyClientIds(),
+                        session.attemptId,
+                        keepReady = true
+                    )
+                    setAttemptState(PartyAttemptState.READY)
+                    readinessResume()
+                    clear()
+                    return@execute
+                }
+                activeRoomCreator = replacement.candidate
+                if (replacement.candidate.clientId == this.clientId()) {
+                    startAutomaticCreator(
+                        MinecraftClient.getInstance(),
+                        session.attemptId,
+                        session.commandRoot,
+                        replacement.candidate
+                    )
+                } else if (!sendAutomaticCreatorGo(session.attemptId, session.commandRoot, replacement.candidate)) {
+                    overlay("Party: could not start replacement room creator")
+                    setAttemptState(PartyAttemptState.READY)
+                    readinessResume()
+                    clear()
+                }
+                return@execute
+            }
+
             if (session.isActive && session.results.containsAll(session.expectedClientIds)) {
                 setAttemptState(PartyAttemptState.READY)
+                readinessResume()
                 clear()
             }
         }
@@ -331,18 +549,22 @@ internal class PartyJoinCoordinator(
     fun cancel(command: String, broadcast: Boolean) {
         val attemptId = session.attemptId
         val keepReady = isQuitCommand(command)
+        pendingAutomaticCommand = null
+        pendingAutomaticStartAt = 0L
+        pendingAutomaticExcludedCreators = emptySet()
         if (keepReady && broadcast && !isCoordinator()) {
             transport()?.sendJoinCancelRequest(attemptId)
         }
         if (broadcast && isCoordinator() && hasActiveSession()) {
             val peers = activePartyClientIds()
             transport()?.sendPartyCommand(peers, command)
-            if (attemptId.isNotBlank()) transport()?.sendJoinCancel(peers, attemptId)
+            if (attemptId.isNotBlank()) transport()?.sendJoinCancel(peers, attemptId, keepReady)
         }
         PartyJoinExecutor.cancel(command)
         stopRoomMonitor()
         clear()
         if (keepReady) {
+            readinessResume()
             setAttemptState(PartyAttemptState.READY)
         } else {
             readinessClear()
@@ -354,6 +576,12 @@ internal class PartyJoinCoordinator(
     fun clear() {
         session.reset()
         history.reset()
+        pendingAutomaticCommand = null
+        pendingAutomaticStartAt = 0L
+        pendingAutomaticExcludedCreators = emptySet()
+        activeRoomCreator = null
+        automaticFollowersLaunched = false
+        failedCreatorClientIds.clear()
     }
 
     fun handleJoinChat(message: String) {
@@ -362,12 +590,18 @@ internal class PartyJoinCoordinator(
     }
 
     fun handleLocalMenuEscape() {
-        if (!isCoordinator() || !session.isActive || !PartyJoinExecutor.isRunning()) return
-        cancel("party menu closed", broadcast = true)
+        if (isCoordinator()) {
+            if (session.isActive) cancel("party menu closed", broadcast = true)
+        } else if (PartyJoinExecutor.isRunning()) {
+            cancel("dchien quit", broadcast = true)
+        }
     }
+
+    fun isJoinActive(): Boolean = session.isActive || PartyJoinExecutor.isRunning()
 
     fun stopRoomMonitor() {
         activeRoomCommandRoot = null
+        activeRoomWasAutomatic = false
     }
 
     private fun startLocalJoin(
@@ -377,12 +611,13 @@ internal class PartyJoinCoordinator(
         typeSlot: Int,
         roomSlot: Int
     ) {
-        PartyJoinExecutor.start(client, attemptId, command, typeSlot, roomSlot) { success, reason ->
-            if (success) startRoomMonitor(session.commandRoot)
+        PartyJoinExecutor.start(client, attemptId, command, typeSlot, roomSlot) { success, reason, cost ->
+            commitAllowanceAndNotify(success, cost)
             if (isCoordinator()) {
-                handleJoinResult(clientId(), attemptId, success, reason)
+                handleJoinResult(clientId(), attemptId, success, reason, cost)
             } else {
                 transport()?.sendJoinResult(attemptId, success, reason)
+                readinessResume()
                 setAttemptState(PartyAttemptState.READY)
                 clear()
             }
@@ -426,41 +661,85 @@ internal class PartyJoinCoordinator(
                 }
             },
             onPhase = { phase -> debugToast("Party: $phase") }
-        ) { success, reason ->
-            if (success) startRoomMonitor(session.commandRoot)
+        ) { success, reason, cost ->
+            commitAllowanceAndNotify(success, cost)
             if (isCoordinator()) {
-                handleJoinResult(clientId(), attemptId, success, reason)
+                handleJoinResult(clientId(), attemptId, success, reason, cost)
             } else {
                 transport()?.sendJoinResult(attemptId, success, reason)
+                readinessResume()
                 setAttemptState(PartyAttemptState.READY)
                 clear()
             }
         }
     }
 
-    fun handleJoinResult(clientId: String, attemptId: String, success: Boolean, reason: String) {
+    private fun commitAllowanceAndNotify(success: Boolean, cost: PartyAllowanceCost?) {
+        if (!success) return
+        commitAllowance(cost)
+        if (cost == null) {
+            debugToast("Party: /${session.commandRoot} cost not parsed; allowance unchanged")
+            return
+        }
+        val remaining = localRunsRemaining(cost.commandRoot)
+        val status = remaining?.let { "/${cost.commandRoot} -${cost.amount}; $it left" }
+            ?: "/${cost.commandRoot} cost ${cost.amount}; remaining unknown"
+        debugToast("Party: $status")
+    }
+
+    fun handleJoinResult(
+        clientId: String,
+        attemptId: String,
+        success: Boolean,
+        reason: String,
+        roomCost: PartyAllowanceCost? = null
+    ) {
         MinecraftClient.getInstance().execute {
             if (attemptId != session.attemptId || clientId !in session.expectedClientIds) return@execute
             if (success) {
+                if (clientId != this.clientId() &&
+                    creatorCandidates().firstOrNull { it.clientId == clientId }
+                        ?.remainingFor(session.commandRoot) == 0
+                ) {
+                    unselectExhaustedClient(clientId, session.commandRoot)
+                }
+                if (activeRoomCreator?.clientId == clientId &&
+                    RvlAddonsConfigStore.config.partyJoinExecutionMode == PartyJoinExecutionMode.AUTOMATIC
+                ) {
+                    startAutomaticFollowers(attemptId)
+                }
                 if (isCoordinator() &&
                     clientId == this.clientId() &&
                     RvlAddonsConfigStore.config.partyJoinExecutionMode == PartyJoinExecutionMode.MANUAL
                 ) {
-                    history.latestTypeAction()
-                        ?.let { transport()?.sendManualRoomAccepted(participantIds(), attemptId, it) }
+                    history.latestTypeAction()?.let {
+                        transport()?.sendManualRoomAccepted(participantIds(), attemptId, it, roomCost?.amount)
+                    }
                 }
                 session.results.add(clientId)
                 debugToast("Party: $clientId joined")
             } else {
+                if (isCoordinator() &&
+                    RvlAddonsConfigStore.config.partyJoinExecutionMode == PartyJoinExecutionMode.AUTOMATIC &&
+                    activeRoomCreator?.clientId == clientId && !automaticFollowersLaunched &&
+                    retryAutomaticCreator(attemptId)
+                ) return@execute
                 session.failures[clientId] = reason.ifBlank { "join failed" }
                 debugToast("Party: $clientId failed to join")
             }
             if (session.failures.isNotEmpty()) {
+                transport()?.sendJoinCancel(activePartyClientIds(), session.attemptId, keepReady = true)
                 setAttemptState(PartyAttemptState.READY)
+                readinessResume()
                 overlay("Party join failed: ${session.failures.values.first()}")
                 clear()
             } else if (session.results.containsAll(session.expectedClientIds)) {
+                startRoomMonitor(
+                    session.commandRoot,
+                    automatic = RvlAddonsConfigStore.config.partyJoinExecutionMode == PartyJoinExecutionMode.AUTOMATIC
+                )
                 setAttemptState(PartyAttemptState.READY)
+                readinessResume()
                 overlay("Party joined successfully")
                 clear()
             }
@@ -469,8 +748,18 @@ internal class PartyJoinCoordinator(
 
     private fun hasActiveSession(): Boolean = session.isActive || PartyJoinExecutor.isRunning()
 
-    private fun startRoomMonitor(commandRoot: String) {
+    private fun automaticSlots(command: String): Pair<Int, Int> {
+        val config = RvlAddonsConfigStore.config
+        return if (command.trim().removePrefix("/").substringBefore(' ').equals("tl", ignoreCase = true)) {
+            config.partyTlAutomaticTypeSlot to config.partyTlAutomaticRoomSlot
+        } else {
+            config.partyAutomaticTypeSlot to config.partyAutomaticRoomSlot
+        }
+    }
+
+    private fun startRoomMonitor(commandRoot: String, automatic: Boolean) {
         activeRoomCommandRoot = commandRoot.trim().removePrefix("/").lowercase()
+        activeRoomWasAutomatic = automatic
     }
 
     private fun handleRoomFinishedChat(message: String): Boolean {
@@ -484,8 +773,25 @@ internal class PartyJoinCoordinator(
             else -> false
         }
         if (!finished) return false
+        val shouldLoop = activeRoomWasAutomatic &&
+                RvlAddonsConfigStore.config.partyJoinExecutionMode == PartyJoinExecutionMode.AUTOMATIC &&
+                RvlAddonsConfigStore.config.partyAutoRunMode == PartyAutoRunMode.LOOP &&
+                isCoordinator()
         activeRoomCommandRoot = null
+        activeRoomWasAutomatic = false
         debugToast("Party: $root room finished")
+        if (shouldLoop) {
+            val config = RvlAddonsConfigStore.config
+            val delaySeconds = if (root == "tl") {
+                config.partyTlLoopDelaySeconds.coerceAtLeast(10)
+            } else {
+                config.partyDchienLoopDelaySeconds.coerceAtLeast(3)
+            }
+            pendingAutomaticCommand = root
+            pendingAutomaticStartAt = System.currentTimeMillis() + delaySeconds * 1_000L
+            pendingAutomaticExcludedCreators = emptySet()
+            debugToast("Party: next loop in ${delaySeconds}s")
+        }
         return true
     }
 
