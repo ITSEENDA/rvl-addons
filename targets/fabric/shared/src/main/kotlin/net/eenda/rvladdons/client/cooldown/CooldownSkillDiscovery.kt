@@ -2,10 +2,12 @@ package net.eenda.rvladdons.client.cooldown
 
 import net.eenda.rvladdons.client.coma.ComaSwapController
 import net.eenda.rvladdons.client.coma.FabricComaItemAdapter
+import net.eenda.rvladdons.client.item.FabricItemAdapter
 import net.eenda.rvladdons.core.RvlAddonsConfigStore
 import net.eenda.rvladdons.core.RvlTextMatcher
 import net.eenda.rvladdons.feature.cooldown.SkillDescriptor
 import net.eenda.rvladdons.feature.cooldown.SkillHand
+import net.eenda.rvladdons.feature.cooldown.SkillConfidence
 import net.eenda.rvladdons.feature.cooldown.SkillProfileStore
 import net.eenda.rvladdons.feature.cooldown.SkillSourceSnapshot
 import net.eenda.rvladdons.feature.cooldown.SkillSourceType
@@ -80,7 +82,37 @@ object CooldownSkillDiscovery {
             discoverSetProfiles(selected.pieces, selected.setId, selected.setName, selected.sourceType)
         }.flatten()
         SkillProfileStore.deduplicate()
-        return result.distinctBy { it.descriptor.skillKey }
+        return (result + restoredComaProfiles(comaStacks)).distinctBy { it.descriptor.skillKey }
+    }
+
+    private fun restoredComaProfiles(comaStacks: List<ItemStack?>): List<DiscoveredSkill> {
+        val index = ComaSwapController.confirmedSetIndex()
+        val set = RvlAddonsConfigStore.config.comaSets.getOrNull(index)
+            ?.takeIf { it.enabled } ?: return emptyList()
+        val setId = comaSetId(index, set.rules())
+        val icon = comaStacks.filterNotNull().firstOrNull { !it.isEmpty } ?: return emptyList()
+
+        return SkillProfileStore.all().asSequence()
+            .filter { it.enabled && it.sourceType == SkillSourceType.COMA_SET && it.setId == setId }
+            .map { profile ->
+                DiscoveredSkill(
+                    SkillDescriptor(
+                        skillKey = profile.skillKey,
+                        displayName = profile.label,
+                        setId = profile.setId,
+                        sourceFingerprint = profile.sourceFingerprint,
+                        trigger = profile.trigger,
+                        cooldownHintMs = profile.cooldownHintMs,
+                        rawLines = emptyList(),
+                        confidence = SkillConfidence.HIGH,
+                        skillType = profile.skillType,
+                        setBonusLevel = profile.setBonusLevel
+                    ),
+                    icon.copy(),
+                    profile.sourceType
+                )
+            }
+            .toList()
     }
 
     fun discoverProfiles(
@@ -88,15 +120,15 @@ object CooldownSkillDiscovery {
         forcedSetId: String? = null,
         sourceType: SkillSourceType = SkillSourceType.ITEM
     ): List<DiscoveredSkill> {
-        if (stack.isEmpty || FabricComaItemAdapter.isArmor(stack)) return emptyList()
-        val snapshot = FabricComaItemAdapter.snapshot(stack)
+        if (stack.isEmpty || FabricItemAdapter.isArmor(stack)) return emptyList()
+        val snapshot = FabricItemAdapter.snapshot(stack)
         val setId = forcedSetId ?: FabricComaItemAdapter.extractSetName(stack)
         return SkillTextParser.parse(
             snapshot.itemId,
             stack.name.string,
             snapshot.fingerprint,
             setId,
-            FabricComaItemAdapter.loreLines(stack)
+            FabricItemAdapter.loreLines(stack)
         ).map { descriptor ->
             val profile = SkillProfileStore.register(descriptor, sourceType)
             DiscoveredSkill(normalizeDescriptor(descriptor, profile), stack.copy(), sourceType)
@@ -110,7 +142,7 @@ object CooldownSkillDiscovery {
         hand: SkillHand
     ): SkillSourceSnapshot? {
         if (stack.isEmpty) return null
-        val snapshot = FabricComaItemAdapter.snapshot(stack)
+        val snapshot = FabricItemAdapter.snapshot(stack)
         return SkillSourceSnapshot(
             itemId = snapshot.itemId,
             displayName = descriptor?.displayName ?: stack.name.string,
@@ -126,7 +158,7 @@ object CooldownSkillDiscovery {
     }
 
     fun heldSourceType(stack: ItemStack, hand: SkillHand): SkillSourceType = when {
-        !FabricComaItemAdapter.isWeapon(stack) -> SkillSourceType.ITEM
+        !FabricItemAdapter.isWeapon(stack) -> SkillSourceType.ITEM
         hand == SkillHand.MAIN -> SkillSourceType.MAIN_HAND_WEAPON
         hand == SkillHand.OFF -> SkillSourceType.OFF_HAND_WEAPON
         else -> SkillSourceType.ITEM
@@ -142,16 +174,16 @@ object CooldownSkillDiscovery {
         sourceType: SkillSourceType
     ): List<DiscoveredSkill> {
         SkillProfileStore.removeLegacyItemProfiles(
-            pieces.map { FabricComaItemAdapter.snapshot(it).fingerprint }.toSet()
+            pieces.map { FabricItemAdapter.snapshot(it).fingerprint }.toSet()
         )
         val parsed = pieces.flatMap { stack ->
-            val snapshot = FabricComaItemAdapter.snapshot(stack)
+            val snapshot = FabricItemAdapter.snapshot(stack)
             SkillTextParser.parse(
                 snapshot.itemId,
                 stack.name.string,
                 snapshot.fingerprint,
                 setId,
-                FabricComaItemAdapter.loreLines(stack)
+                FabricItemAdapter.loreLines(stack)
             ).filter { descriptor ->
                 val tier = descriptor.setBonusLevel
                 tier == null || tier <= pieces.size

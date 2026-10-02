@@ -1,6 +1,7 @@
 package net.eenda.rvladdons.client.cooldown
 
 import net.eenda.rvladdons.core.RvlAddonsTrace
+import net.eenda.rvladdons.client.item.FabricItemAdapter
 import net.eenda.rvladdons.feature.cooldown.CooldownConfidence
 import net.eenda.rvladdons.feature.cooldown.CooldownEntry
 import net.eenda.rvladdons.feature.cooldown.CooldownRegistry
@@ -90,7 +91,7 @@ internal class CooldownServerCorrelation(
         if (existing != null) {
             if (!icons.containsKey(key)) {
                 val icon = action?.let(pending::iconFor)
-                    ?: source?.let { stackForSource(it) ?: net.eenda.rvladdons.client.coma.FabricComaItemAdapter.iconStack(it.itemId) }
+                    ?: source?.let { stackForSource(it) ?: FabricItemAdapter.iconStack(it.itemId) }
                 if (icon != null && !icon.isEmpty) icons[key] = icon.copy()
             }
             existing.endAt = now + remainingMs
