@@ -7,6 +7,7 @@ import net.eenda.rvladdons.core.RvlAddonsTrace
 import net.eenda.rvladdons.core.RvlTextMatcher
 import net.eenda.rvladdons.core.state.StateMachine
 import net.eenda.rvladdons.feature.coma.ComaItemRuleCodec
+import net.eenda.rvladdons.client.item.FabricItemAdapter
 import net.eenda.rvladdons.feature.coma.ComaInventorySnapshot
 import net.eenda.rvladdons.feature.coma.ComaRole
 import net.eenda.rvladdons.feature.coma.ComaSetConfig
@@ -278,6 +279,8 @@ object ComaSwapController {
         return currentComaStacks.map { it?.copy() }
     }
 
+    internal fun confirmedSetIndex(): Int = confirmedSetIndex
+
     fun inventoryStacks(client: MinecraftClient, setIndex: Int): List<ItemStack?> =
         findInventoryStacks(client, setIndex)
 
@@ -426,7 +429,7 @@ object ComaSwapController {
             val iconIds = persisted.iconItemIds.ifEmpty {
                 persisted.rules.map { ComaItemRuleCodec.decode(it)?.itemId.orEmpty() }
             }
-            iconIds.map { FabricComaItemAdapter.iconStack(it) }
+            iconIds.map { FabricItemAdapter.iconStack(it) }
                 .let { ids -> ids + List(4 - ids.size) { null } }
                 .take(4)
         }
@@ -443,7 +446,7 @@ object ComaSwapController {
         client.currentServerEntry?.address?.trim()?.lowercase().orEmpty()
 
     private fun iconItemIds(): List<String> = currentComaStacks.map { stack ->
-        stack?.takeUnless(ItemStack::isEmpty)?.let { FabricComaItemAdapter.snapshot(it).itemId }.orEmpty()
+        stack?.takeUnless(ItemStack::isEmpty)?.let(FabricItemAdapter::itemId).orEmpty()
     }
 
 }

@@ -2,6 +2,7 @@ package net.eenda.rvladdons.client.cooldown
 
 import net.eenda.rvladdons.RvlAddonsClient
 import net.eenda.rvladdons.client.coma.FabricComaItemAdapter
+import net.eenda.rvladdons.client.item.FabricItemAdapter
 import net.eenda.rvladdons.core.RvlAddonsTrace
 import net.eenda.rvladdons.feature.cooldown.CooldownEntry
 import net.eenda.rvladdons.feature.cooldown.PendingSkillAction
@@ -137,8 +138,8 @@ object CooldownController {
         val now = System.currentTimeMillis()
         candidates.forEach { candidate ->
             val hand = when {
-                FabricComaItemAdapter.sameItem(player.mainHandStack, candidate.stack) -> SkillHand.MAIN
-                FabricComaItemAdapter.sameItem(player.offHandStack, candidate.stack) -> SkillHand.OFF
+                FabricItemAdapter.sameItem(player.mainHandStack, candidate.stack) -> SkillHand.MAIN
+                FabricItemAdapter.sameItem(player.offHandStack, candidate.stack) -> SkillHand.OFF
                 else -> SkillHand.UNKNOWN
             }
             queueAction(

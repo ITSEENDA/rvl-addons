@@ -4,6 +4,7 @@ import net.eenda.rvladdons.RvlAddonsClient
 import net.eenda.rvladdons.core.RvlAddonsConfigStore
 import net.eenda.rvladdons.core.RvlAddonsTrace
 import net.eenda.rvladdons.core.RvlTextMatcher
+import net.eenda.rvladdons.client.item.FabricItemAdapter
 import net.eenda.rvladdons.feature.coma.ComaRole
 import net.minecraft.client.MinecraftClient
 import net.minecraft.client.gui.screen.ingame.HandledScreen
@@ -79,10 +80,10 @@ internal class ComaCaptureActiveState(owner: ComaSwapController) : ComaState(own
             val next = sync.contents.getOrNull(slot) ?: return@forEachIndexed
             val previous = current.previousContents.getOrNull(slot)
             if (!FabricComaItemAdapter.isComaEquipment(next, index) ||
-                FabricComaItemAdapter.sameItem(previous, next)
+                FabricItemAdapter.sameItem(previous, next)
             ) return@forEachIndexed
 
-            val pending = pendingClicks.firstOrNull { FabricComaItemAdapter.sameItem(it.stack, next) }
+            val pending = pendingClicks.firstOrNull { FabricItemAdapter.sameItem(it.stack, next) }
                 ?: return@forEachIndexed
             pendingClicks.remove(pending)
             val encoded = FabricComaItemAdapter.encodeRule(next)
