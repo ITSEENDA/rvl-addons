@@ -4,7 +4,9 @@ import dev.tako.libs.client.ui.core.TakoScreenChrome
 import dev.tako.libs.client.ui.core.TakoTheme
 import dev.tako.libs.client.ui.layout.*
 import dev.tako.libs.client.ui.widget.TakoButton
+import net.eenda.rvladdons.core.RvlAddonsConfigStore
 import net.eenda.rvladdons.feature.party.PartyClientSnapshot
+import net.eenda.rvladdons.feature.party.PartyJoinExecutionMode
 import net.minecraft.client.gui.DrawContext
 import net.minecraft.client.gui.Drawable
 import net.minecraft.client.gui.screen.Screen
@@ -30,7 +32,7 @@ class PartyScreen(private val parent: Screen?) : Screen(Text.literal("Local Clon
     private companion object {
         const val PANEL_X = 24
         const val PANEL_Y = 42
-        const val ROW_HEIGHT = 38
+        const val ROW_HEIGHT = 32
         const val FOOTER_HEIGHT = 48
         const val COMPACT_FOOTER_HEIGHT = 76
         const val ROW_GAP_X = 6
@@ -39,7 +41,7 @@ class PartyScreen(private val parent: Screen?) : Screen(Text.literal("Local Clon
     override fun init() {
         scrollState.reset()
         val coordinator = LocalPartyController.isCoordinator()
-        if (coordinator) {
+        if (showCaptureButtons(coordinator)) {
             val captureDchienLabel = if (isCompact()) "Capture Dchien" else "Capture doan chien room"
             val captureTlLabel = if (isCompact()) "Capture TL" else "Capture thanh lan room"
             val captureGap = 8
@@ -319,6 +321,9 @@ class PartyScreen(private val parent: Screen?) : Screen(Text.literal("Local Clon
 
     private fun footerHeight(coordinator: Boolean): Int =
         if (coordinator && isCompact()) COMPACT_FOOTER_HEIGHT else FOOTER_HEIGHT
+
+    private fun showCaptureButtons(coordinator: Boolean): Boolean =
+        coordinator && RvlAddonsConfigStore.config.partyJoinExecutionMode == PartyJoinExecutionMode.AUTOMATIC
 
     private fun clientListTop(coordinator: Boolean): Int = PANEL_Y + if (coordinator) 76 else 64
 
