@@ -13,6 +13,7 @@ internal class PartySlotCaptureController(
     private val isJoinActive: () -> Boolean,
     private val stopAllowanceScan: () -> Unit,
     private val sendCommand: (String) -> Boolean,
+    private val publishCapturedRoom: () -> Unit,
     private val notify: (String) -> Unit
 ) {
     private enum class Stage { IDLE, WAITING_TYPE_MENU, TYPE, WAITING_ROOM, ROOM }
@@ -62,6 +63,7 @@ internal class PartySlotCaptureController(
     }
 
     fun onSlotAction(syncId: Int, slot: Int, button: Int, action: SlotActionType): Boolean {
+        if (cancelIfNotCoordinator()) return false
         updateMenu()
         if (stage == Stage.IDLE) return false
         if (stage == Stage.WAITING_TYPE_MENU || stage == Stage.WAITING_ROOM) return true
@@ -94,6 +96,7 @@ internal class PartySlotCaptureController(
             config.partyAutomaticRoomName = snapshot.itemName
         }
         RvlAddonsConfigStore.save()
+        publishCapturedRoom()
         val capturedCommand = commandRoot
         reset()
         MinecraftClient.getInstance().player?.closeHandledScreen()
@@ -101,9 +104,13 @@ internal class PartySlotCaptureController(
         return true
     }
 
-    fun onMenuOpened() = updateMenu(menuOpenedPacket = true)
+    fun onMenuOpened() {
+        if (cancelIfNotCoordinator()) return
+        updateMenu(menuOpenedPacket = true)
+    }
 
     fun tick(now: Long) {
+        if (cancelIfNotCoordinator()) return
         updateMenu()
         if (isActive && now >= deadline) {
             reset()
@@ -157,6 +164,13 @@ internal class PartySlotCaptureController(
         stage = Stage.ROOM
         deadline = System.currentTimeMillis() + TIMEOUT_MS
         notify("Room menu ready; click its item to capture the room slot")
+    }
+
+    private fun cancelIfNotCoordinator(): Boolean {
+        if (!isActive || isCoordinator()) return false
+        reset()
+        notify("Slot capture cancelled; only the coordinator can capture slots")
+        return true
     }
 
     private fun currentMenuSnapshot(): MenuSnapshot? {

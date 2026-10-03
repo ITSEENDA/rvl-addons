@@ -120,6 +120,9 @@ object LocalPartyController {
         },
         stopAllowanceScan = ::stopAllowanceScan,
         sendCommand = PartyJoinExecutor::sendCommand,
+        publishCapturedRoom = {
+            publishPresence(MinecraftClient.getInstance(), PartyPresenceState.IN_SERVER)
+        },
         notify = { message ->
             MinecraftClient.getInstance().execute {
                 TakoToastManager.show("Party: $message")
