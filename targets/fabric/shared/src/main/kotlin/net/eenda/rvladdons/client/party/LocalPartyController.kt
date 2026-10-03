@@ -8,11 +8,11 @@ import net.eenda.rvladdons.feature.party.PartyAttemptState
 import net.eenda.rvladdons.feature.party.PartyClientSnapshot
 import net.eenda.rvladdons.feature.party.PartyJoinExecutionMode
 import net.eenda.rvladdons.feature.party.PartyPresenceState
+import net.eenda.rvladdons.feature.party.PartyPrimaryTransferCoordinator
 import net.eenda.rvladdons.feature.party.PartyRegistry
 import net.fabricmc.loader.api.FabricLoader
 import net.minecraft.client.MinecraftClient
 import net.minecraft.client.gui.screen.ingame.HandledScreen
-import net.minecraft.item.Items
 import net.minecraft.screen.slot.SlotActionType
 import net.minecraft.text.Text
 import java.nio.file.Files
@@ -21,32 +21,15 @@ import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 
 object LocalPartyController {
-    private enum class SlotCaptureStage { IDLE, WAITING_TYPE_MENU, TYPE, WAITING_ROOM, ROOM }
-
-    private data class MenuCaptureSnapshot(
-        val syncId: Int,
-        val fingerprint: String,
-        val itemName: String = ""
-    )
-
     private val synchronizedCommandRoots = setOf("dchien", "tl")
     private const val ID_FILE = "rvl-addons-party.properties"
     private const val PREPARE_TIMEOUT_MS = 2_000L
-    private const val SLOT_CAPTURE_TIMEOUT_MS = 15_000L
     private val registry = PartyRegistry()
     private var transport: LocalPartyTransport? = null
     private var clientId = ""
     private var attemptState = PartyAttemptState.IDLE
     private var lastLocalUpdate = 0L
-    private var slotCaptureStage = SlotCaptureStage.IDLE
-    private var initialTypeMenuSyncId = -1
-    private var slotCaptureCommandRoot = "dchien"
-    private var typeMenuBeforeCapture: MenuCaptureSnapshot? = null
-    private var slotCaptureDeadline = 0L
     private var allowanceScanStarted = false
-    @Volatile private var pendingPromotionSelection: Set<String>? = null
-    @Volatile private var promotionReconnectIds: Set<String> = emptySet()
-    @Volatile private var promotionReconnectDeadline = 0L
     private var pendingAutomaticHandoffRoot: String? = null
     private var pendingAutomaticHandoffDeadline = 0L
     private val selectedClientIds = ConcurrentHashMap.newKeySet<String>()
@@ -129,6 +112,21 @@ object LocalPartyController {
         }
     )
 
+    private val slotCapture = PartySlotCaptureController(
+        isCoordinator = ::isCoordinator,
+        isJoinActive = {
+            attemptState == PartyAttemptState.PREPARING ||
+                attemptState == PartyAttemptState.JOINING || PartyJoinExecutor.isRunning()
+        },
+        stopAllowanceScan = ::stopAllowanceScan,
+        sendCommand = PartyJoinExecutor::sendCommand,
+        notify = { message ->
+            MinecraftClient.getInstance().execute {
+                TakoToastManager.show("Party: $message")
+            }
+        }
+    )
+
 
     fun initialize() {
         if (!ModEnabledState.isEnabled()) return
@@ -199,19 +197,16 @@ object LocalPartyController {
         }
         stopAllowanceScan()
         allowances.stopScan()
-        resetSlotCapture()
+        slotCapture.reset()
         pendingAutomaticHandoffRoot = null
         pendingAutomaticHandoffDeadline = 0L
-        pendingPromotionSelection = null
-        promotionReconnectIds = emptySet()
-        promotionReconnectDeadline = 0L
         PartyJoinExecutor.cancel("party disabled")
         transport?.stop()
         transport = null
         attemptState = PartyAttemptState.IDLE
         selectedClientIds.clear()
         readiness.clear()
-        clearPromotion()
+        primaryTransfer.reset()
         clearJoin()
         registry.replace(emptyList())
     }
@@ -220,8 +215,8 @@ object LocalPartyController {
         PartyJoinExecutor.tick()
         val now = System.currentTimeMillis()
         joinCoordinator.tick(now)
-        tickSlotCapture(now)
-        if (!PartyJoinExecutor.isRunning() && slotCaptureStage == SlotCaptureStage.IDLE) {
+        slotCapture.tick(now)
+        if (!PartyJoinExecutor.isRunning() && !slotCapture.isActive) {
             allowances.tick(client, PartyJoinExecutor::sendCommand)
         }
         tryStartAllowanceScan(client)
@@ -237,7 +232,7 @@ object LocalPartyController {
         publishPresence(client, state)
         readiness.tick(client)
         if (primaryTransfer.isExpired(now)) {
-            primaryTransfer.clear()
+            primaryTransfer.clearTransfer()
             client.inGameHud.setOverlayMessage(Text.literal("Party: primary transfer timed out"), false)
         }
     }
@@ -259,7 +254,7 @@ object LocalPartyController {
 
     private fun tryStartAllowanceScan(client: MinecraftClient) {
         if (allowanceScanStarted || !ModEnabledState.isEnabled() || !GameplayServerState.isActive()) return
-        if (PartyJoinExecutor.isRunning() || slotCaptureStage != SlotCaptureStage.IDLE) return
+        if (PartyJoinExecutor.isRunning() || slotCapture.isActive) return
         if (allowances.isScanning()) {
             allowanceScanStarted = true
             return
@@ -401,14 +396,11 @@ object LocalPartyController {
         allowances.reset()
         pendingAutomaticHandoffRoot = null
         pendingAutomaticHandoffDeadline = 0L
-        pendingPromotionSelection = null
-        promotionReconnectIds = emptySet()
-        promotionReconnectDeadline = 0L
-        resetSlotCapture()
+        slotCapture.reset()
         attemptState = PartyAttemptState.IDLE
         selectedClientIds.clear()
         readiness.clear()
-        clearPromotion()
+        primaryTransfer.reset()
         joinCoordinator.stopRoomMonitor()
         PartyJoinExecutor.cancel("disconnected")
         clearJoin()
@@ -472,15 +464,14 @@ object LocalPartyController {
 
     fun onServerMenuOpened() {
         MinecraftClient.getInstance().execute {
-            updateSlotCaptureMenu(menuOpenedPacket = true)
+            slotCapture.onMenuOpened()
             PartyJoinExecutor.onServerMenuOpened()
         }
     }
 
     fun onPartyMenuEscape() {
         if (MinecraftClient.getInstance().currentScreen !is HandledScreen<*>) return
-        if (slotCaptureStage != SlotCaptureStage.IDLE) {
-            resetSlotCapture()
+        if (slotCapture.cancel()) {
             debugToast("Party: slot capture cancelled")
             return
         }
@@ -539,163 +530,12 @@ object LocalPartyController {
 
 
     fun onLocalSlotAction(syncId: Int, slot: Int, button: Int, action: SlotActionType): Boolean {
-        updateSlotCaptureMenu()
-        if (handleSlotCaptureClick(syncId, slot, button, action)) return true
+        if (slotCapture.onSlotAction(syncId, slot, button, action)) return true
         joinCoordinator.onLocalSlotAction(slot, button, action)
         return false
     }
 
-    fun startAutomaticSlotCapture(commandRoot: String) {
-        if (!isCoordinator()) {
-            slotCaptureNotice("Only the coordinator can configure automatic slots")
-            return
-        }
-        val root = commandRoot.trim().removePrefix("/").lowercase(Locale.ROOT)
-        if (root != "dchien" && root != "tl") return
-        if (attemptState == PartyAttemptState.PREPARING ||
-            attemptState == PartyAttemptState.JOINING ||
-            PartyJoinExecutor.isRunning()
-        ) {
-            slotCaptureNotice("Finish the current join before capturing slots")
-            return
-        }
-
-        allowances.stopScan()
-        stopAllowanceScan()
-        slotCaptureStage = SlotCaptureStage.WAITING_TYPE_MENU
-        slotCaptureCommandRoot = root
-        initialTypeMenuSyncId = currentMenuCaptureSnapshot()?.syncId ?: -1
-        typeMenuBeforeCapture = null
-        slotCaptureDeadline = System.currentTimeMillis() + SLOT_CAPTURE_TIMEOUT_MS
-        slotCaptureNotice("Opening /$root; click the type item when the menu appears")
-        if (!PartyJoinExecutor.sendCommand(root)) {
-            resetSlotCapture()
-            slotCaptureNotice("Could not open /$root")
-        }
-    }
-
-    private fun handleSlotCaptureClick(
-        syncId: Int,
-        slot: Int,
-        button: Int,
-        action: SlotActionType
-    ): Boolean {
-        if (slotCaptureStage == SlotCaptureStage.IDLE) return false
-        if (slotCaptureStage == SlotCaptureStage.WAITING_TYPE_MENU ||
-            slotCaptureStage == SlotCaptureStage.WAITING_ROOM
-        ) {
-            return true
-        }
-        if (button != 0 || action != SlotActionType.PICKUP) {
-            slotCaptureNotice("Use a left click on a menu item")
-            return true
-        }
-
-        val snapshot = menuCaptureSnapshot(syncId, slot) ?: run {
-            slotCaptureNotice("Click a filled menu slot, not your inventory")
-            return true
-        }
-        val config = RvlAddonsConfigStore.config
-        if (slotCaptureStage == SlotCaptureStage.TYPE) {
-            if (slotCaptureCommandRoot == "tl") config.partyTlAutomaticTypeSlot = slot
-            else config.partyAutomaticTypeSlot = slot
-            RvlAddonsConfigStore.save()
-            typeMenuBeforeCapture = snapshot
-            slotCaptureStage = SlotCaptureStage.WAITING_ROOM
-            slotCaptureDeadline = System.currentTimeMillis() + SLOT_CAPTURE_TIMEOUT_MS
-            slotCaptureNotice("/$slotCaptureCommandRoot type #$slot captured (${snapshot.itemName.take(24)}); waiting for room menu")
-            return false
-        }
-
-        if (slotCaptureCommandRoot == "tl") {
-            config.partyTlAutomaticRoomSlot = slot
-            config.partyTlAutomaticRoomName = snapshot.itemName
-        } else {
-            config.partyAutomaticRoomSlot = slot
-            config.partyAutomaticRoomName = snapshot.itemName
-        }
-        RvlAddonsConfigStore.save()
-        val capturedCommand = slotCaptureCommandRoot
-        resetSlotCapture()
-        MinecraftClient.getInstance().player?.closeHandledScreen()
-        slotCaptureNotice("/$capturedCommand room #$slot captured (${snapshot.itemName.take(24)}); click blocked")
-        return true
-    }
-
-    private fun menuCaptureSnapshot(syncId: Int, slot: Int): MenuCaptureSnapshot? {
-        val client = MinecraftClient.getInstance()
-        val screen = client.currentScreen as? HandledScreen<*> ?: return null
-        val handler = client.player?.currentScreenHandler ?: return null
-        if (handler.syncId != syncId) return null
-
-        val menuSlots = if (handler.slots.size > 36) handler.slots.dropLast(36) else handler.slots
-        val clickedStack = menuSlots.getOrNull(slot)?.stack ?: return null
-        if (clickedStack.isEmpty || clickedStack.item == Items.BLACK_STAINED_GLASS_PANE ||
-            clickedStack.item == Items.BOOK
-        ) return null
-
-        return MenuCaptureSnapshot(
-            syncId,
-            menuFingerprint(screen.title.string, menuSlots),
-            clickedStack.name.string
-        )
-    }
-
-    private fun updateSlotCaptureMenu(menuOpenedPacket: Boolean = false) {
-        if (slotCaptureStage == SlotCaptureStage.WAITING_TYPE_MENU) {
-            val current = currentMenuCaptureSnapshot() ?: return
-            if (!menuOpenedPacket && initialTypeMenuSyncId >= 0 && current.syncId == initialTypeMenuSyncId) return
-            initialTypeMenuSyncId = -1
-            slotCaptureStage = SlotCaptureStage.TYPE
-            slotCaptureDeadline = System.currentTimeMillis() + SLOT_CAPTURE_TIMEOUT_MS
-            slotCaptureNotice("Type menu ready; click its item to capture the type slot")
-            return
-        }
-        if (slotCaptureStage != SlotCaptureStage.WAITING_ROOM) return
-        val current = currentMenuCaptureSnapshot() ?: return
-        val previous = typeMenuBeforeCapture ?: return resetSlotCapture()
-        if (!menuOpenedPacket && current.syncId == previous.syncId && current.fingerprint == previous.fingerprint) return
-
-        slotCaptureStage = SlotCaptureStage.ROOM
-        slotCaptureDeadline = System.currentTimeMillis() + SLOT_CAPTURE_TIMEOUT_MS
-        slotCaptureNotice("Room menu ready; click its item to capture the room slot")
-    }
-
-    private fun currentMenuCaptureSnapshot(): MenuCaptureSnapshot? {
-        val client = MinecraftClient.getInstance()
-        val screen = client.currentScreen as? HandledScreen<*> ?: return null
-        val handler = client.player?.currentScreenHandler ?: return null
-        val menuSlots = if (handler.slots.size > 36) handler.slots.dropLast(36) else handler.slots
-        return MenuCaptureSnapshot(handler.syncId, menuFingerprint(screen.title.string, menuSlots))
-    }
-
-    private fun menuFingerprint(title: String, slots: List<net.minecraft.screen.slot.Slot>): String =
-        "$title|${slots.size}|" + slots.joinToString("|") { slot ->
-            val stack = slot.stack
-            if (stack.isEmpty) "empty" else "${stack.name.string}:${stack.count}"
-        }
-
-    private fun tickSlotCapture(now: Long) {
-        updateSlotCaptureMenu()
-        if (slotCaptureStage != SlotCaptureStage.IDLE && now >= slotCaptureDeadline) {
-            resetSlotCapture()
-            slotCaptureNotice("Slot capture timed out")
-        }
-    }
-
-    private fun resetSlotCapture() {
-        slotCaptureStage = SlotCaptureStage.IDLE
-        slotCaptureCommandRoot = "dchien"
-        initialTypeMenuSyncId = -1
-        typeMenuBeforeCapture = null
-        slotCaptureDeadline = 0L
-    }
-
-    private fun slotCaptureNotice(message: String) {
-        MinecraftClient.getInstance().execute {
-            TakoToastManager.show("Party: $message")
-        }
-    }
+    fun startAutomaticSlotCapture(commandRoot: String) = slotCapture.start(commandRoot)
 
     fun handleJoinChat(message: String) {
         joinCoordinator.handleJoinChat(message)
@@ -869,7 +709,7 @@ object LocalPartyController {
     }
 
     private fun clearPromotion() {
-        primaryTransfer.clear()
+        primaryTransfer.clearTransfer()
     }
 
     private fun clearJoin() {
@@ -883,8 +723,10 @@ object LocalPartyController {
         if (status.startsWith("peer-disconnected:")) {
             val disconnectedId = status.removePrefix("peer-disconnected:")
             MinecraftClient.getInstance().execute {
-                val reconnectingAfterPromotion = disconnectedId in promotionReconnectIds &&
-                        System.currentTimeMillis() <= promotionReconnectDeadline
+                val reconnectingAfterPromotion = primaryTransfer.isReconnecting(
+                    disconnectedId,
+                    System.currentTimeMillis()
+                )
                 if (!reconnectingAfterPromotion) selectedClientIds.remove(disconnectedId)
                 registry.updateSelection(disconnectedId, false)
                 readiness.removeParticipant(disconnectedId)
@@ -911,28 +753,23 @@ object LocalPartyController {
 
     private fun replaceSnapshots(values: List<PartyClientSnapshot>) {
         val clientIds = values.mapTo(HashSet()) { it.clientId }
-        if (System.currentTimeMillis() <= promotionReconnectDeadline) {
-            selectedClientIds.retainAll(clientIds + promotionReconnectIds)
-            promotionReconnectIds = promotionReconnectIds - clientIds
-        } else {
-            selectedClientIds.retainAll(clientIds)
-            promotionReconnectIds = emptySet()
-            promotionReconnectDeadline = 0L
-        }
+        val retainedSelection = primaryTransfer.reconcileSelection(
+            selectedClientIds.toSet(),
+            clientIds,
+            System.currentTimeMillis()
+        )
+        selectedClientIds.retainAll(retainedSelection)
         registry.replace(values.map { it.copy(selected = selectedClientIds.contains(it.clientId)) })
     }
 
     private fun cachePromotionSelection(clientIds: Set<String>) {
-        pendingPromotionSelection = clientIds
-        promotionReconnectIds = clientIds
-        promotionReconnectDeadline = System.currentTimeMillis() + 5_000L
+        primaryTransfer.cacheCommittedSelection(clientIds, System.currentTimeMillis())
     }
 
     private fun applyPromotionSelection() {
-        val selected = pendingPromotionSelection ?: return
+        val selected = primaryTransfer.takePendingSelection() ?: return
         selectedClientIds.clear()
         selectedClientIds.addAll(selected.filterNot { it == clientId })
-        pendingPromotionSelection = null
         registry.snapshot().forEach { snapshot ->
             registry.updateSelection(snapshot.clientId, selectedClientIds.contains(snapshot.clientId))
         }

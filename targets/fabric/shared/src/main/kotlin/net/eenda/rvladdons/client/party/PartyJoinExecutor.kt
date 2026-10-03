@@ -2,7 +2,6 @@ package net.eenda.rvladdons.client.party
 
 import net.eenda.rvladdons.core.RvlAddonsConfigStore
 import net.eenda.rvladdons.core.RvlTextMatcher
-import net.eenda.rvladdons.core.state.BaseState
 import net.eenda.rvladdons.core.state.StateMachine
 import net.eenda.rvladdons.feature.party.PartyManualActionType
 import net.eenda.rvladdons.feature.party.PartyMenuStage
@@ -39,16 +38,6 @@ object PartyJoinExecutor {
         var deadline: Long = 0L
     )
 
-    private data class PendingManualAction(
-        val sequence: Int,
-        val slot: Int,
-        val button: Int,
-        val action: SlotActionType,
-        val intentVersion: Int,
-        val type: PartyManualActionType,
-        val targetSignature: String
-    )
-
     private val stateMachine = StateMachine()
     internal val idleState = PartyJoinIdleState(this)
     internal val waitingMenuState = PartyJoinWaitingMenuState(this)
@@ -62,33 +51,15 @@ object PartyJoinExecutor {
 
     private var client: MinecraftClient? = null
     private val menuDetector = PartyMenuDetector { client }
+    private val manualReplay = PartyManualReplay(this)
     private var run: JoinRun? = null
     private var failureReason: String? = null
     private var successRequested = false
     private var result: ((Boolean, String, PartyAllowanceCost?) -> Unit)? = null
     private var dispatchingCommand = false
     private var manualMode = false
-    private val manualPendingActions = ArrayDeque<PendingManualAction>()
-    private var manualLastAppliedSequence = 0
-    private var manualLastClickSyncId = -1
-    private var manualLastHandler: ScreenHandler? = null
-    private var manualAwaitingTransition = false
-    private var manualWaitingForRefresh = false
-    private var manualSkipNextTransition = false
-    private var manualMenuReadyNotified = false
-    private var manualIntentVersion = 0
-    private var manualMenuStage = PartyMenuStage.UNKNOWN
-    private var manualTypeFingerprint: String? = null
-    private var manualLastActionType: PartyManualActionType? = null
-    private var manualRecoveryPending = false
-    private var roomSelectionExpected = false
     private var automaticTypeTargetSignature = ""
     private var automaticTypeRetryRequested = false
-    private var manualActionAppliedCallback: (Int) -> Unit = {}
-    private var manualMenuReadyCallback: () -> Unit = {}
-    private var manualMenuStageCallback: (PartyMenuStage, Int) -> Unit = { _, _ -> }
-    private var manualResyncCallback: (Int) -> Unit = {}
-    private var manualPhaseCallback: (String) -> Unit = {}
 
     private var typeClickNotBefore = 0L
 
@@ -107,13 +78,13 @@ object PartyJoinExecutor {
             clickTypeState.clicked && failureReason == null
         }
         stateMachine.addTransitionFrom(manualTypeMenuState, waitingRoomState) {
-            manualMenuStage == PartyMenuStage.ROOM_MENU && failureReason == null
+            manualReplay.menuStage == PartyMenuStage.ROOM_MENU && failureReason == null
         }
         stateMachine.addTransitionFrom(waitingRoomState, completedState) {
             successRequested && failureReason == null
         }
         stateMachine.addTransitionFrom(waitingRoomState, manualTypeMenuState) {
-            manualMenuStage == PartyMenuStage.TYPE_MENU && failureReason == null
+            manualReplay.menuStage == PartyMenuStage.TYPE_MENU && failureReason == null
         }
         stateMachine.addTransitionFrom(waitingRoomState, clickRoomState) {
             waitingRoomState.menuReady && failureReason == null
@@ -223,27 +194,15 @@ object PartyJoinExecutor {
         successRequested = false
         result = onResult
         manualMode = manual
-        manualPendingActions.clear()
-        manualLastAppliedSequence = 0
-        manualLastClickSyncId = -1
-        manualLastHandler = null
-        manualAwaitingTransition = false
-        manualWaitingForRefresh = false
-        manualSkipNextTransition = false
-        manualMenuReadyNotified = false
-        manualIntentVersion = 0
-        manualMenuStage = PartyMenuStage.UNKNOWN
-        manualTypeFingerprint = null
-        manualLastActionType = null
-        manualRecoveryPending = false
-        roomSelectionExpected = false
+        manualReplay.start(
+            onActionApplied,
+            onMenuReady,
+            onMenuStage,
+            onResyncRequested,
+            onPhase
+        )
         automaticTypeTargetSignature = ""
         automaticTypeRetryRequested = false
-        manualActionAppliedCallback = onActionApplied
-        manualMenuReadyCallback = onMenuReady
-        manualMenuStageCallback = onMenuStage
-        manualResyncCallback = onResyncRequested
-        manualPhaseCallback = onPhase
         stateMachine.changeState(waitingMenuState)
         dispatchingCommand = true
         try {
@@ -270,7 +229,7 @@ object PartyJoinExecutor {
             stateMachine.changeState(idleState)
             return
         }
-        manualPhaseCallback("cancelled: $reason")
+        manualReplay.onCancelled(reason)
         complete(false, reason)
         stateMachine.changeState(idleState)
     }
@@ -281,31 +240,24 @@ object PartyJoinExecutor {
 
     fun isManualModeActive(): Boolean = manualMode && run != null
 
-    fun currentManualMenuStage(): PartyMenuStage = manualMenuStage
+    fun currentManualMenuStage(): PartyMenuStage = manualReplay.currentStage()
 
-    internal fun refreshManualMenuStage(): PartyMenuStage? {
-        if (!isManualModeActive()) return null
-        val detected = detectManualMenuStage() ?: return manualMenuStage
-        if (detected != manualMenuStage) updateManualMenuStage(detected)
-        return detected
-    }
+    internal fun refreshManualMenuStage(): PartyMenuStage? = manualReplay.refreshMenuStage()
 
-    internal fun isRoomSelectionExpected(): Boolean =
-        isManualModeActive() && roomSelectionExpected
+    internal fun isRoomSelectionExpected(): Boolean = manualReplay.isRoomSelectionExpected()
 
-    fun currentManualIntentVersion(): Int = manualIntentVersion
+    fun currentManualIntentVersion(): Int = manualReplay.intentVersion
 
     fun manualSlotSignature(slot: Int): String {
         return menuDetector.itemSignature(slot)
     }
 
     internal fun captureAutomaticTypeMenu() {
-        manualTypeFingerprint = currentMenuFingerprint()
+        manualReplay.captureTypeMenu(currentMenuFingerprint())
         currentRun()?.let { automaticTypeTargetSignature = manualSlotSignature(it.typeSlot) }
     }
 
-    internal fun isTypeMenuVisible(): Boolean =
-        manualTypeFingerprint != null && menuDetector.fingerprint() == manualTypeFingerprint
+    internal fun isTypeMenuVisible(): Boolean = manualReplay.isTypeMenuVisible()
 
     internal fun requestAutomaticTypeRetry() {
         val currentHandler = currentHandler() ?: return
@@ -329,16 +281,7 @@ object PartyJoinExecutor {
         automaticTypeRetryRequested = false
     }
 
-    internal fun detectManualRoomAccepted(): Boolean {
-        if (!manualMode || manualMenuStage != PartyMenuStage.ROOM_MENU) return false
-        if (manualLastActionType != PartyManualActionType.SELECT_ROOM || !manualAwaitingTransition) return false
-        if (currentHandler() != null) return false
-        manualAwaitingTransition = false
-        updateManualMenuStage(PartyMenuStage.JOINED)
-        markRoomSubmitted()
-        debugPhase("room selection submitted; waiting for join confirmation")
-        return true
-    }
+    internal fun detectManualRoomAccepted(): Boolean = manualReplay.detectRoomAccepted()
 
     internal fun markRoomSubmitted() {
         val currentRun = run ?: return
@@ -430,57 +373,7 @@ object PartyJoinExecutor {
         }
     }
 
-    fun onServerMenuOpened() {
-        if (!isManualModeActive()) return
-        val currentHandler = currentHandler() ?: return
-        val currentRun = run ?: return
-        val nextStage = detectManualMenuStage() ?: return
-
-        if (!manualMenuReadyNotified) {
-            waitingMenuState.menuReady = true
-            currentRun.menuSyncId = currentHandler.syncId
-            currentRun.deadline = 0L
-            updateManualMenuStage(PartyMenuStage.TYPE_MENU)
-            notifyManualMenuReady()
-            debugPhase("dchien type menu ready")
-            releaseInitialManualAction()
-            return
-        }
-
-        val previousStage = manualMenuStage
-        if (previousStage == PartyMenuStage.ROOM_MENU && nextStage == PartyMenuStage.TYPE_MENU) {
-            val newTypeActionPending = manualPendingActions.any {
-                it.type == PartyManualActionType.SELECT_TYPE && it.intentVersion >= manualIntentVersion
-            }
-            if (!newTypeActionPending) manualPendingActions.clear()
-            manualWaitingForRefresh = false
-            manualAwaitingTransition = false
-            roomSelectionExpected = false
-            delayTypeClick()
-            updateManualMenuStage(PartyMenuStage.TYPE_MENU)
-            debugPhase("room selection invalidated; waiting for coordinator")
-            return
-        }
-
-        updateManualMenuStage(nextStage)
-        if (manualAwaitingTransition) {
-            manualAwaitingTransition = false
-            manualLastHandler = currentHandler
-            manualLastClickSyncId = currentHandler.syncId
-            if (manualSkipNextTransition) {
-                manualSkipNextTransition = false
-                debugPhase("menu navigation received; waiting for room refresh")
-                return
-            }
-            debugPhase("server menu barrier received")
-        }
-        manualLastHandler = currentHandler
-        manualLastClickSyncId = currentHandler.syncId
-        if (previousStage == PartyMenuStage.ROOM_MENU && nextStage == PartyMenuStage.ROOM_MENU) {
-            manualWaitingForRefresh = false
-        }
-        processManualActions()
-    }
+    fun onServerMenuOpened() = manualReplay.onServerMenuOpened()
 
     fun queueManualClick(
         sequence: Int,
@@ -490,59 +383,7 @@ object PartyJoinExecutor {
         intentVersion: Int,
         type: String,
         targetSignature: String
-    ): Boolean {
-        if (!isManualModeActive() || sequence <= manualLastAppliedSequence) return false
-        val slotAction = runCatching { SlotActionType.valueOf(action) }.getOrNull() ?: run {
-            fail("unknown slot action $action")
-            return false
-        }
-        val actionType = runCatching { PartyManualActionType.valueOf(type) }.getOrNull() ?: run {
-            fail("unknown party action type $type")
-            return false
-        }
-        if (intentVersion < manualIntentVersion) return false
-        if (intentVersion > manualIntentVersion) {
-            manualPendingActions.clear()
-            manualAwaitingTransition = false
-            manualWaitingForRefresh = false
-            manualSkipNextTransition = false
-            manualIntentVersion = intentVersion
-        }
-        if (actionType == PartyManualActionType.SELECT_TYPE) {
-            manualPendingActions.removeIf {
-                it.type == PartyManualActionType.SELECT_ROOM && it.intentVersion <= intentVersion
-            }
-            manualWaitingForRefresh = false
-        }
-        if (actionType == PartyManualActionType.SELECT_ROOM &&
-            (manualPendingActions.any {
-                it.type == PartyManualActionType.SELECT_ROOM && it.intentVersion == intentVersion
-            } || (manualLastActionType == PartyManualActionType.SELECT_ROOM &&
-                    manualAwaitingTransition && manualIntentVersion == intentVersion))
-        ) {
-            return false
-        }
-        if (manualPendingActions.none { it.sequence == sequence }) {
-            if (actionType == PartyManualActionType.SELECT_TYPE &&
-                manualLastActionType == PartyManualActionType.SELECT_ROOM
-            ) {
-                delayTypeClick()
-            }
-            manualPendingActions.addLast(
-                PendingManualAction(
-                    sequence,
-                    slot,
-                    button,
-                    slotAction,
-                    intentVersion,
-                    actionType,
-                    targetSignature
-                )
-            )
-            manualWaitingForRefresh = actionType == PartyManualActionType.SELECT_ROOM
-        }
-        return true
-    }
+    ): Boolean = manualReplay.queueClick(sequence, slot, button, action, intentVersion, type, targetSignature)
 
     fun queueManualRecoveryType(
         sequence: Int,
@@ -552,79 +393,20 @@ object PartyJoinExecutor {
         intentVersion: Int,
         targetSignature: String,
         allowanceCost: Int?
-    ): Boolean {
-        if (!isManualModeActive()) return false
-        receiveRoomCost(allowanceCost)
-        val slotAction = runCatching { SlotActionType.valueOf(action) }.getOrNull() ?: return false
-        if (intentVersion < manualIntentVersion) return false
-        manualIntentVersion = maxOf(manualIntentVersion, intentVersion)
-        manualPendingActions.removeIf { it.type == PartyManualActionType.SELECT_ROOM }
-        manualWaitingForRefresh = false
-        manualAwaitingTransition = false
-        manualSkipNextTransition = false
-        manualPendingActions.removeIf { it.sequence == sequence && it.type == PartyManualActionType.SELECT_TYPE }
-        manualPendingActions.addFirst(
-            PendingManualAction(
-                sequence,
-                slot,
-                button,
-                slotAction,
-                intentVersion,
-                PartyManualActionType.SELECT_TYPE,
-                targetSignature
-            )
-        )
-        manualRecoveryPending = true
-        delayTypeClick()
-        if (manualMenuStage == PartyMenuStage.TYPE_MENU) processManualActions()
-        return true
-    }
+    ): Boolean = manualReplay.queueRecoveryType(
+        sequence, slot, button, action, intentVersion, targetSignature, allowanceCost
+    )
 
-    internal fun observeLocalRoomSelection() {
-        if (!isManualModeActive()) return
-        markRoomSubmitted()
-        val handler = currentHandler()
-        roomSelectionExpected = false
-        updateManualMenuStage(PartyMenuStage.ROOM_MENU)
-        manualLastActionType = PartyManualActionType.SELECT_ROOM
-        manualLastClickSyncId = handler?.syncId ?: -1
-        manualLastHandler = handler
-        manualWaitingForRefresh = false
-        manualAwaitingTransition = true
-        debugPhase("local room selection observed")
-    }
+    internal fun observeLocalRoomSelection() = manualReplay.observeLocalRoomSelection()
 
-    fun resetManualReplay() {
-        if (!isManualModeActive()) return
-        manualPendingActions.clear()
-        manualLastAppliedSequence = 0
-        manualLastClickSyncId = -1
-        manualLastHandler = currentHandler()
-        manualAwaitingTransition = false
-        manualWaitingForRefresh = false
-        manualSkipNextTransition = false
-        manualMenuReadyNotified = false
-        manualRecoveryPending = false
-        roomSelectionExpected = false
-    }
+    fun resetManualReplay() = manualReplay.resetReplay()
 
     fun recordManualCoordinatorAction(
         sequence: Int,
         intentVersion: Int,
         type: PartyManualActionType,
         targetSignature: String = ""
-    ) {
-        if (!isManualModeActive()) return
-        val handler = currentHandler()
-        manualIntentVersion = intentVersion
-        manualLastActionType = type
-        if (type == PartyManualActionType.SELECT_TYPE) markTypeSubmitted()
-        roomSelectionExpected = type == PartyManualActionType.SELECT_TYPE
-        manualLastAppliedSequence = sequence
-        manualLastClickSyncId = handler?.syncId ?: -1
-        manualLastHandler = handler
-        manualAwaitingTransition = true
-    }
+    ) = manualReplay.recordCoordinatorAction(sequence, intentVersion, type)
 
     internal fun currentRun(): JoinRun? = run
 
@@ -635,114 +417,27 @@ object PartyJoinExecutor {
     internal fun hasMenuItem(slot: Int): Boolean =
         menuDetector.hasMenuItem(slot)
 
-    private fun detectManualMenuStage(): PartyMenuStage? {
-        return menuDetector.stage(manualTypeFingerprint)
-    }
+    internal fun detectManualMenuStage(typeMenuFingerprint: String?): PartyMenuStage? =
+        menuDetector.stage(typeMenuFingerprint)
+
+    internal fun findManualSlot(signature: String, fallback: Int): Int =
+        menuDetector.findMenuItem(signature, fallback)
 
     internal fun currentMenuFingerprint(): String? {
         return menuDetector.fingerprint()
     }
 
-    private fun updateManualMenuStage(stage: PartyMenuStage) {
-        if (manualMenuStage == stage) return
-        manualMenuStage = stage
-        manualMenuStageCallback(stage, manualIntentVersion)
-    }
-
-    internal fun markManualInitialMenuReady() {
-        if (!isManualModeActive() || manualMenuReadyNotified) return
-        val handler = currentHandler() ?: return
-        run?.menuSyncId = handler.syncId
-        manualTypeFingerprint = currentMenuFingerprint()
-        updateManualMenuStage(PartyMenuStage.TYPE_MENU)
-        notifyManualMenuReady()
-        releaseInitialManualAction()
-    }
+    internal fun markManualInitialMenuReady() = manualReplay.markInitialMenuReady()
 
     internal fun clickSlot(slot: Int): Boolean {
         return clickSlotAction(slot, 0, SlotActionType.PICKUP)
     }
 
-    internal fun processManualActions() {
-        if (!isManualModeActive()) return
-        val handler = currentHandler() ?: return
-        if (manualAwaitingTransition) {
-            if (handler !== manualLastHandler || handler.syncId != manualLastClickSyncId) {
-                val previousStage = manualMenuStage
-                val nextStage = detectManualMenuStage() ?: PartyMenuStage.UNKNOWN
-                manualAwaitingTransition = false
-                manualLastHandler = handler
-                manualLastClickSyncId = handler.syncId
-                updateManualMenuStage(nextStage)
-                if (previousStage == PartyMenuStage.TYPE_MENU &&
-                    nextStage == PartyMenuStage.ROOM_MENU &&
-                    manualLastActionType == PartyManualActionType.SELECT_TYPE
-                ) {
-                    debugPhase("type menu navigation received")
-                    return
-                }
-                if (manualSkipNextTransition) {
-                    manualSkipNextTransition = false
-                    debugPhase("menu navigation received; waiting for room refresh")
-                    return
-                }
-                manualWaitingForRefresh = false
-                debugPhase("server menu barrier received")
-            } else {
-                return
-            }
-        }
-        if (manualLastHandler != null &&
-            (handler !== manualLastHandler || handler.syncId != manualLastClickSyncId)
-        ) {
-            manualLastHandler = handler
-            manualLastClickSyncId = handler.syncId
-            manualWaitingForRefresh = false
-            debugPhase("server menu barrier received")
-        }
-        if (manualWaitingForRefresh) return
-        val pending = manualPendingActions.firstOrNull()
-        if (pending != null) {
-            if (pending.type == PartyManualActionType.SELECT_TYPE &&
-                manualMenuStage != PartyMenuStage.TYPE_MENU
-            ) return
-            if (pending.type == PartyManualActionType.SELECT_TYPE && !canClickType()) return
-            if (pending.type == PartyManualActionType.SELECT_ROOM &&
-                manualMenuStage != PartyMenuStage.ROOM_MENU
-            ) return
-            val targetSlot = resolveManualSlot(pending)
-            if (pending.type == PartyManualActionType.SELECT_ROOM) captureRoomCost(targetSlot)
-            if (pending.type == PartyManualActionType.SELECT_ROOM) markRoomSubmitted()
-            if (clickSlotAction(targetSlot, pending.button, pending.action)) {
-                manualPendingActions.removeFirst()
-                manualLastActionType = pending.type
-                if (pending.type == PartyManualActionType.SELECT_TYPE) markTypeSubmitted()
-                manualLastAppliedSequence = pending.sequence
-                manualLastClickSyncId = handler.syncId
-                manualLastHandler = handler
-                manualAwaitingTransition = true
-                if (pending.type == PartyManualActionType.SELECT_TYPE && manualRecoveryPending) {
-                    markRoomSubmitted()
-                    manualRecoveryPending = false
-                }
-                manualActionAppliedCallback(pending.sequence)
-                debugPhase("applied action #${pending.sequence}")
-            }
-            return
-        }
-    }
+    internal fun processManualActions() = manualReplay.processActions()
 
-    internal fun releaseInitialManualAction() {
-        if (manualLastAppliedSequence != 0 || manualPendingActions.isEmpty()) return
-        manualWaitingForRefresh = false
-        processManualActions()
-    }
+    internal fun releaseInitialManualAction() = manualReplay.releaseInitialAction()
 
-    private fun resolveManualSlot(action: PendingManualAction): Int {
-        return menuDetector.findMenuItem(action.targetSignature, action.slot)
-    }
-
-    private fun clickSlotAction(slot: Int, button: Int, action: SlotActionType): Boolean {
+    internal fun clickSlotAction(slot: Int, button: Int, action: SlotActionType): Boolean {
         val currentClient = client ?: return false
         val handler = currentHandler() ?: return false
         val player = currentClient.player ?: return false
@@ -758,11 +453,11 @@ object PartyJoinExecutor {
 
     internal fun fail(reason: String) {
         if (failureReason == null) failureReason = reason
-        manualPhaseCallback("failed: $reason")
+        manualReplay.onFailure(reason)
     }
 
     internal fun debugPhase(message: String) {
-        if (manualMode) manualPhaseCallback(message)
+        manualReplay.debugPhase(message)
     }
 
     internal fun complete(success: Boolean, reason: String = "") {
@@ -774,194 +469,10 @@ object PartyJoinExecutor {
         failureReason = null
         successRequested = false
         manualMode = false
-        manualPendingActions.clear()
-        manualAwaitingTransition = false
-        manualWaitingForRefresh = false
-        manualSkipNextTransition = false
-        manualMenuReadyNotified = false
-        roomSelectionExpected = false
+        manualReplay.onRunCompleted()
         automaticTypeRetryRequested = false
-        manualActionAppliedCallback = {}
-        manualMenuReadyCallback = {}
-        manualResyncCallback = {}
-        manualPhaseCallback = {}
         callback?.invoke(success, reason, committedCost)
     }
 
-    internal fun notifyManualMenuReady() {
-        if (!manualMode || manualMenuReadyNotified) return
-        manualMenuReadyNotified = true
-        manualMenuReadyCallback()
-    }
-}
-
-internal abstract class PartyJoinState(protected val owner: PartyJoinExecutor) : BaseState()
-
-internal class PartyJoinIdleState(owner: PartyJoinExecutor) : PartyJoinState(owner)
-
-internal class PartyJoinWaitingMenuState(owner: PartyJoinExecutor) : PartyJoinState(owner) {
-    internal var menuReady = false
-
-    override fun onEnter() {
-        menuReady = false
-        owner.debugPhase("waiting for dchien menu")
-        owner.currentRun()?.deadline = System.currentTimeMillis() + PartyJoinExecutor.MENU_TIMEOUT_MS
-    }
-
-    override fun onUpdate() {
-        val run = owner.currentRun() ?: return
-        if (System.currentTimeMillis() >= run.deadline) {
-            owner.fail("dchien menu timeout")
-            return
-        }
-        val handler = owner.currentHandler() ?: return
-        if (run.baselineSyncId < 0 || handler.syncId != run.baselineSyncId) {
-            run.menuSyncId = handler.syncId
-            menuReady = true
-            owner.captureAutomaticTypeMenu()
-            owner.debugPhase("dchien menu ready")
-        }
-    }
-}
-
-internal class PartyJoinManualTypeMenuState(owner: PartyJoinExecutor) : PartyJoinState(owner) {
-    override fun onEnter() {
-        owner.markManualInitialMenuReady()
-        owner.debugPhase("type menu stage")
-    }
-
-    override fun onUpdate() {
-        owner.processManualActions()
-    }
-}
-
-internal class PartyJoinClickTypeState(owner: PartyJoinExecutor) : PartyJoinState(owner) {
-    internal var clicked = false
-
-    override fun onEnter() {
-        clicked = false
-        owner.clearAutomaticTypeRetry()
-    }
-
-    override fun onUpdate() {
-        val run = owner.currentRun() ?: return
-        if (!owner.canClickType()) return
-        if (owner.currentHandler()?.syncId != run.menuSyncId) return
-        clicked = owner.clickSlot(owner.automaticTypeSlot(run.typeSlot))
-        if (clicked) owner.markTypeSubmitted()
-        if (!clicked) owner.fail("type menu unavailable")
-    }
-}
-
-internal class PartyJoinWaitingRoomState(owner: PartyJoinExecutor) : PartyJoinState(owner) {
-    internal var menuReady = false
-    private var candidateFingerprint: String? = null
-    private var roomReadyAt = 0L
-    override fun onEnter() {
-        menuReady = false
-        candidateFingerprint = null
-        roomReadyAt = 0L
-        if (owner.isManualModeActive()) {
-            owner.debugPhase("room menu stage")
-            return
-        }
-        owner.currentRun()?.apply {
-            sawMenuClose = false
-            deadline = System.currentTimeMillis() + PartyJoinExecutor.ROOM_TIMEOUT_MS
-        }
-    }
-
-    override fun onUpdate() {
-        if (owner.isManualModeActive()) {
-            if (owner.detectJoinSuccess()) {
-                owner.markJoinSuccess()
-                return
-            }
-            if (owner.detectManualRoomAccepted()) return
-            owner.processManualActions()
-            return
-        }
-        val run = owner.currentRun() ?: return
-        if (owner.detectJoinSuccess()) {
-            owner.markJoinSuccess()
-            return
-        }
-        val now = System.currentTimeMillis()
-
-        if (now >= run.deadline) {
-            owner.fail("room menu timeout")
-            return
-        }
-        val handler = owner.currentHandler()
-        if (handler == null) {
-            run.sawMenuClose = true
-            return
-        }
-
-        val fingerprint = owner.currentMenuFingerprint() ?: return
-        val handlerChanged = handler.syncId != run.menuSyncId || run.sawMenuClose
-
-        if (owner.isTypeMenuVisible()) {
-            if (!handlerChanged) return
-
-            menuReady = false
-            owner.requestAutomaticTypeRetry()
-            return
-        }
-        if (candidateFingerprint != fingerprint) {
-            candidateFingerprint = fingerprint
-            roomReadyAt = now + PartyJoinExecutor.menuSettleDelayMs()
-            return
-        }
-
-        if (now < roomReadyAt) return
-        if (!owner.hasMenuItem(run.roomSlot)) return
-
-        menuReady = true
-    }
-}
-
-internal class PartyJoinClickRoomState(owner: PartyJoinExecutor) : PartyJoinState(owner) {
-    internal var clicked = false
-
-    override fun onEnter() {
-        clicked = false
-    }
-
-    override fun onUpdate() {
-        val run = owner.currentRun() ?: return
-        if (!owner.hasMenuItem(run.roomSlot)) return
-        owner.captureRoomCost(run.roomSlot)
-        owner.markRoomSubmitted()
-        clicked = owner.clickSlot(run.roomSlot)
-        if (!clicked) owner.fail("room menu unavailable")
-    }
-}
-
-internal class PartyJoinWaitingResultState(owner: PartyJoinExecutor) : PartyJoinState(owner) {
-    override fun onEnter() {
-        owner.currentRun()?.deadline = System.currentTimeMillis() + PartyJoinExecutor.RESULT_TIMEOUT_MS
-    }
-
-    override fun onUpdate() {
-        val run = owner.currentRun() ?: return
-        if (System.currentTimeMillis() >= run.deadline) {
-            owner.fail("join result timeout")
-            return
-        }
-        if (owner.detectJoinSuccess()) owner.markJoinSuccess()
-        owner.processManualActions()
-    }
-}
-
-internal class PartyJoinCompletedState(owner: PartyJoinExecutor) : PartyJoinState(owner) {
-    override fun onEnter() {
-        owner.complete(true)
-    }
-}
-
-internal class PartyJoinFailedState(owner: PartyJoinExecutor) : PartyJoinState(owner) {
-    override fun onEnter() {
-        owner.complete(false, "join failed")
-    }
+    internal fun notifyManualMenuReady() = manualReplay.notifyMenuReady()
 }

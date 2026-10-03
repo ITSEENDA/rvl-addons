@@ -1,12 +1,12 @@
 package net.eenda.rvladdons.client.party
 
 import net.eenda.rvladdons.core.RvlAddonsConfigStore
-import net.eenda.rvladdons.core.RvlTextMatcher
 import net.eenda.rvladdons.feature.party.PartyAttemptState
 import net.eenda.rvladdons.feature.party.PartyAutoRunMode
 import net.eenda.rvladdons.feature.party.PartyJoinExecutionMode
 import net.eenda.rvladdons.feature.party.PartyManualActionType
 import net.eenda.rvladdons.feature.party.PartyMenuStage
+import net.eenda.rvladdons.feature.party.PartyRoomRunMonitor
 import net.minecraft.client.MinecraftClient
 import net.minecraft.screen.slot.SlotActionType
 import net.minecraft.text.Text
@@ -43,8 +43,7 @@ internal class PartyJoinCoordinator(
     private var pendingAutomaticCommand: String? = null
     private var pendingAutomaticStartAt = 0L
     private var pendingAutomaticExcludedCreators: Set<String> = emptySet()
-    private var activeRoomCommandRoot: String? = null
-    private var activeRoomWasAutomatic = false
+    private val roomRunMonitor = PartyRoomRunMonitor()
 
     fun handlePartyCommand(command: String) {
         MinecraftClient.getInstance().execute {
@@ -600,8 +599,7 @@ internal class PartyJoinCoordinator(
     fun isJoinActive(): Boolean = session.isActive || PartyJoinExecutor.isRunning()
 
     fun stopRoomMonitor() {
-        activeRoomCommandRoot = null
-        activeRoomWasAutomatic = false
+        roomRunMonitor.stop()
     }
 
     private fun startLocalJoin(
@@ -758,27 +756,16 @@ internal class PartyJoinCoordinator(
     }
 
     private fun startRoomMonitor(commandRoot: String, automatic: Boolean) {
-        activeRoomCommandRoot = commandRoot.trim().removePrefix("/").lowercase()
-        activeRoomWasAutomatic = automatic
+        roomRunMonitor.start(commandRoot, automatic)
     }
 
     private fun handleRoomFinishedChat(message: String): Boolean {
-        val root = activeRoomCommandRoot ?: return false
-        val finished = when (root) {
-            "dchien" ->
-                RvlTextMatcher.contains(message, "VƯỢT THÀNH CÔNG ĐOÀN CHIẾN") ||
-                        RvlTextMatcher.contains(message, "THẢO PHẠT ĐOÀN CHIẾN THÀNH CÔNG")
-
-            "tl" -> RvlTextMatcher.contains(message, "VƯỢT THANH LÂN THÀNH CÔNG")
-            else -> false
-        }
-        if (!finished) return false
-        val shouldLoop = activeRoomWasAutomatic &&
+        val finished = roomRunMonitor.completeIfMatched(message) ?: return false
+        val root = finished.commandRoot
+        val shouldLoop = finished.wasAutomatic &&
                 RvlAddonsConfigStore.config.partyJoinExecutionMode == PartyJoinExecutionMode.AUTOMATIC &&
                 RvlAddonsConfigStore.config.partyAutoRunMode == PartyAutoRunMode.LOOP &&
                 isCoordinator()
-        activeRoomCommandRoot = null
-        activeRoomWasAutomatic = false
         debugToast("Party: $root room finished")
         if (shouldLoop) {
             val config = RvlAddonsConfigStore.config
