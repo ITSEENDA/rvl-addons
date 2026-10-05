@@ -6,9 +6,9 @@ import dev.tako.libs.client.ui.core.TakoScreenChrome
 import dev.tako.libs.client.ui.core.TakoTheme
 import dev.tako.libs.client.ui.input.TakoDropdown
 import dev.tako.libs.client.ui.input.TakoSearchField
-import dev.tako.libs.client.ui.layout.TakoAxis
+import dev.tako.libs.client.ui.layout.TakoFlexContainer
+import dev.tako.libs.client.ui.layout.TakoFlexDirection
 import dev.tako.libs.client.ui.layout.TakoBounds
-import dev.tako.libs.client.ui.layout.TakoContainer
 import dev.tako.libs.client.ui.layout.TakoLayoutable
 import dev.tako.libs.client.ui.layout.TakoScrollState
 import dev.tako.libs.client.ui.layout.TakoSizeSpec
@@ -64,7 +64,7 @@ class CooldownProfileScreen(private val parent: Screen?) : Screen(Text.literal("
             refreshFilteredView()
         }
         addDrawableChild(searchField.widget)
-        TakoContainer<TakoLayoutable>(axis = TakoAxis.ROW, gap = 8)
+        TakoFlexContainer<TakoLayoutable>(direction = TakoFlexDirection.ROW, gap = 8)
             .add(searchField, TakoSizeSpec.Fixed(width - 190), TakoSizeSpec.Fixed(20))
             .add(sourceDropdown, TakoSizeSpec.Fixed(132), TakoSizeSpec.Fixed(20))
             .layout(TakoBounds(24, 42, width - 48, 20))
