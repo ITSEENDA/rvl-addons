@@ -354,9 +354,10 @@ class PartyScreen(private val parent: Screen?) : Screen(Text.literal("Local Clon
     }
 
     private fun resourceState(snapshot: PartyClientSnapshot, compact: Boolean): String = when {
-        snapshot.dchienRunsRemaining == 0 && snapshot.tlTicketsRemaining == 0 -> "EXHAUSTED"
-        snapshot.dchienRunsRemaining == 0 -> if (compact) "DCHIEN 0" else "NO DCHIEN"
-        snapshot.tlTicketsRemaining == 0 -> if (compact) "TL 0" else "NO TL"
+        snapshot.dchienAllowanceFresh && snapshot.dchienRunsRemaining == 0 &&
+            snapshot.tlAllowanceFresh && snapshot.tlTicketsRemaining == 0 -> "EXHAUSTED"
+        snapshot.dchienAllowanceFresh && snapshot.dchienRunsRemaining == 0 -> if (compact) "DCHIEN 0" else "NO DCHIEN"
+        snapshot.tlAllowanceFresh && snapshot.tlTicketsRemaining == 0 -> if (compact) "TL 0" else "NO TL"
         else -> when (snapshot.state.name) {
             "IN_SERVER" -> if (compact) "ONLINE" else "IN SERVER"
             "MAIN_MENU" -> if (compact) "MENU" else "MAIN MENU"

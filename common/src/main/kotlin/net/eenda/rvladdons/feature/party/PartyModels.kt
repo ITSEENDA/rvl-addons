@@ -43,14 +43,16 @@ data class PartyClientSnapshot(
     val partyReadyCount: Int = 0,
     val dchienRunsRemaining: Int? = null,
     val tlTicketsRemaining: Int? = null,
+    val dchienAllowanceFresh: Boolean = false,
+    val tlAllowanceFresh: Boolean = false,
     val dchienRoomName: String = "",
     val tlRoomName: String = ""
 ) {
     fun runsRemaining(commandRoot: String): Int? =
         if (commandRoot.trim().removePrefix("/").substringBefore(' ').equals("tl", ignoreCase = true)) {
-            tlTicketsRemaining
+            tlTicketsRemaining.takeIf { tlAllowanceFresh }
         } else {
-            dchienRunsRemaining
+            dchienRunsRemaining.takeIf { dchienAllowanceFresh }
         }
 }
 

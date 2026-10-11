@@ -25,7 +25,7 @@ internal class PartyJoinCoordinator(
     private val readinessPause: () -> Unit,
     private val activePartyClientIds: () -> Set<String>,
     private val setAttemptState: (PartyAttemptState) -> Unit,
-    private val commitAllowance: (PartyAllowanceCost?) -> Unit,
+    private val commitAllowance: (String, PartyAllowanceCost?) -> Unit,
     private val unselectExhaustedClient: (String, String) -> Unit,
     private val localRunsRemaining: (String) -> Int?,
     private val onCoordinatorExhausted: (String) -> Unit,
@@ -610,7 +610,7 @@ internal class PartyJoinCoordinator(
         roomSlot: Int
     ) {
         PartyJoinExecutor.start(client, attemptId, command, typeSlot, roomSlot) { success, reason, cost ->
-            commitAllowanceAndNotify(success, cost)
+            commitAllowanceAndNotify(attemptId, success, cost)
             if (isCoordinator()) {
                 handleJoinResult(clientId(), attemptId, success, reason, cost)
             } else {
@@ -660,7 +660,7 @@ internal class PartyJoinCoordinator(
             },
             onPhase = { phase -> debugToast("Party: $phase") }
         ) { success, reason, cost ->
-            commitAllowanceAndNotify(success, cost)
+            commitAllowanceAndNotify(attemptId, success, cost)
             if (isCoordinator()) {
                 handleJoinResult(clientId(), attemptId, success, reason, cost)
             } else {
@@ -672,9 +672,9 @@ internal class PartyJoinCoordinator(
         }
     }
 
-    private fun commitAllowanceAndNotify(success: Boolean, cost: PartyAllowanceCost?) {
+    private fun commitAllowanceAndNotify(attemptId: String, success: Boolean, cost: PartyAllowanceCost?) {
         if (!success) return
-        commitAllowance(cost)
+        commitAllowance(attemptId, cost)
         if (cost == null) {
             debugToast("Party: /${session.commandRoot} cost not parsed; allowance unchanged")
             return
@@ -717,13 +717,31 @@ internal class PartyJoinCoordinator(
                 session.results.add(clientId)
                 debugToast("Party: $clientId joined")
             } else {
+                val autoMode = RvlAddonsConfigStore.config.partyJoinExecutionMode ==
+                    PartyJoinExecutionMode.AUTOMATIC
+                val allowanceExhausted = reason == PartyJoinExecutor.allowanceExhaustedReason(session.commandRoot)
+                val activeCreator = activeRoomCreator?.clientId == clientId
+                if (autoMode && allowanceExhausted && clientId != this.clientId()) {
+                    unselectExhaustedClient(clientId, session.commandRoot)
+                }
                 if (isCoordinator() &&
-                    RvlAddonsConfigStore.config.partyJoinExecutionMode == PartyJoinExecutionMode.AUTOMATIC &&
-                    activeRoomCreator?.clientId == clientId && !automaticFollowersLaunched &&
+                    autoMode &&
+                    activeCreator && !automaticFollowersLaunched &&
                     retryAutomaticCreator(attemptId)
                 ) return@execute
-                session.failures[clientId] = reason.ifBlank { "join failed" }
-                debugToast("Party: $clientId failed to join")
+                if (autoMode && allowanceExhausted && !activeCreator &&
+                    (clientId != this.clientId() || isCoordinator())
+                ) {
+                    if (clientId == this.clientId()) onCoordinatorExhausted(session.commandRoot)
+                    session.results.add(clientId)
+                    debugToast("Party: $clientId exhausted; skipped")
+                } else {
+                    if (autoMode && allowanceExhausted && clientId == this.clientId() && isCoordinator()) {
+                        onCoordinatorExhausted(session.commandRoot)
+                    }
+                    session.failures[clientId] = reason.ifBlank { "join failed" }
+                    debugToast("Party: $clientId failed to join")
+                }
             }
             if (session.failures.isNotEmpty()) {
                 transport()?.sendJoinCancel(activePartyClientIds(), session.attemptId, keepReady = true)

@@ -1,6 +1,7 @@
 package net.eenda.rvladdons.client.party
 
 import dev.tako.libs.client.ui.feedback.TakoToastManager
+import net.eenda.rvladdons.core.AccountStorage
 import net.eenda.rvladdons.core.ModEnabledState
 import net.eenda.rvladdons.core.RvlAddonsConfigStore
 import net.eenda.rvladdons.core.GameplayServerState
@@ -10,13 +11,12 @@ import net.eenda.rvladdons.feature.party.PartyJoinExecutionMode
 import net.eenda.rvladdons.feature.party.PartyPresenceState
 import net.eenda.rvladdons.feature.party.PartyPrimaryTransferCoordinator
 import net.eenda.rvladdons.feature.party.PartyRegistry
+import net.eenda.rvladdons.feature.party.PartyStateStore
 import net.fabricmc.loader.api.FabricLoader
 import net.minecraft.client.MinecraftClient
 import net.minecraft.client.gui.screen.ingame.HandledScreen
 import net.minecraft.screen.slot.SlotActionType
 import net.minecraft.text.Text
-import java.nio.file.Files
-import java.nio.file.Path
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 
@@ -24,17 +24,17 @@ object LocalPartyController {
     private val synchronizedCommandRoots = setOf("dchien", "tl")
     private const val ID_FILE = "rvl-addons-party.properties"
     private const val PREPARE_TIMEOUT_MS = 2_000L
+    private val partyStatePath = FabricLoader.getInstance().configDir.resolve(ID_FILE)
     private val registry = PartyRegistry()
     private var transport: LocalPartyTransport? = null
     private var clientId = ""
     private var attemptState = PartyAttemptState.IDLE
     private var lastLocalUpdate = 0L
-    private var allowanceScanStarted = false
     private var pendingAutomaticHandoffRoot: String? = null
     private var pendingAutomaticHandoffDeadline = 0L
     private val selectedClientIds = ConcurrentHashMap.newKeySet<String>()
     private val primaryTransfer = PartyPrimaryTransferCoordinator()
-    private val allowances = PartyAllowanceTracker(::debugToast)
+    private val allowances = PartyAllowanceTracker()
     private val roomCreatorRotation = RoomCreatorRotation()
     private val readiness = PartyReadinessCoordinator(
         selectedClients = ::selectedClients,
@@ -60,8 +60,8 @@ object LocalPartyController {
                         snapshot.clientId,
                         "$server|${snapshot.name.lowercase(Locale.ROOT)}",
                         snapshot.name,
-                        snapshot.dchienRunsRemaining,
-                        snapshot.tlTicketsRemaining
+                        snapshot.runsRemaining("dchien"),
+                        snapshot.runsRemaining("tl")
                     )
                 }
             val playerName = MinecraftClient.getInstance().player?.name?.string ?: "This client"
@@ -69,8 +69,8 @@ object LocalPartyController {
                 clientId,
                 "$server|${playerName.lowercase(Locale.ROOT)}",
                 playerName,
-                allowances.dchienRemaining,
-                allowances.tlTicketsRemaining
+                allowances.freshRemaining("dchien"),
+                allowances.freshRemaining("tl")
             )
         },
         creatorRotation = roomCreatorRotation,
@@ -99,7 +99,6 @@ object LocalPartyController {
         mode = { RvlAddonsConfigStore.config.partyJoinExecutionMode },
         showWaiting = { debugToast("Party: waiting for all clients to become READY") },
         startJoin = { root, mode ->
-            stopAllowanceScan()
             beginPartyJoin(root, mode)
         },
         cancelJoin = ::cancelSynchronizedJoin,
@@ -118,7 +117,6 @@ object LocalPartyController {
             attemptState == PartyAttemptState.PREPARING ||
                 attemptState == PartyAttemptState.JOINING || PartyJoinExecutor.isRunning()
         },
-        stopAllowanceScan = ::stopAllowanceScan,
         sendCommand = PartyJoinExecutor::sendCommand,
         publishCapturedRoom = {
             publishPresence(MinecraftClient.getInstance(), PartyPresenceState.IN_SERVER)
@@ -138,9 +136,8 @@ object LocalPartyController {
             current.stop()
             transport = null
         }
-        clientId = createRuntimeClientId(
-            FabricLoader.getInstance().configDir.resolve(ID_FILE)
-        )
+        clientId = "${PartyStateStore.loadOrCreateClientId(partyStatePath)}-${UUID.randomUUID().toString().take(8)}"
+        PartyJoinExecutor.setAllowanceReader(allowances::freshRemaining)
         transport = LocalPartyTransport(
             PartyTransportCallbacks(
                 onSnapshot = ::replaceSnapshots,
@@ -194,12 +191,14 @@ object LocalPartyController {
             lastLocalUpdate = 0L
             initialize()
             MinecraftClient.getInstance().let { client ->
-                if (client.player != null) publishPresence(client, PartyPresenceState.IN_SERVER)
+                if (client.player != null) {
+                    onGameplayServerDetected()
+                    publishPresence(client, PartyPresenceState.IN_SERVER)
+                }
             }
             return
         }
-        stopAllowanceScan()
-        allowances.stopScan()
+        allowances.markStale()
         slotCapture.reset()
         pendingAutomaticHandoffRoot = null
         pendingAutomaticHandoffDeadline = 0L
@@ -215,14 +214,17 @@ object LocalPartyController {
     }
 
     fun tick(client: MinecraftClient) {
+        val canScanAllowances = ModEnabledState.isEnabled() && GameplayServerState.isActive() &&
+            client.player != null && client.world != null && client.currentScreen == null &&
+            !PartyJoinExecutor.isRunning() && !slotCapture.isActive &&
+            attemptState != PartyAttemptState.PREPARING && attemptState != PartyAttemptState.JOINING
+        if (allowances.tick(client, PartyJoinExecutor::sendCommand, canScanAllowances)) {
+            publishPresence(client, PartyPresenceState.IN_SERVER)
+        }
         PartyJoinExecutor.tick()
         val now = System.currentTimeMillis()
         joinCoordinator.tick(now)
         slotCapture.tick(now)
-        if (!PartyJoinExecutor.isRunning() && !slotCapture.isActive) {
-            allowances.tick(client, PartyJoinExecutor::sendCommand)
-        }
-        tryStartAllowanceScan(client)
         readiness.reconcileParticipants(selectedClients().mapTo(HashSet()) { it.clientId })
         processAutomaticHandoff(client)
         if (now - lastLocalUpdate < 500L) return
@@ -247,34 +249,23 @@ object LocalPartyController {
     }
 
     fun onGameplayServerDetected() {
-        tryStartAllowanceScan(MinecraftClient.getInstance())
+        val client = MinecraftClient.getInstance()
+        allowances.onConnected(
+            partyStatePath,
+            AccountStorage.accountId(client.session.uuidOrNull, client.session.username),
+            currentServerKey(client)
+        )
     }
 
     fun onGameplayServerLeft() {
-        allowanceScanStarted = false
-        allowances.reset()
-    }
-
-    private fun tryStartAllowanceScan(client: MinecraftClient) {
-        if (allowanceScanStarted || !ModEnabledState.isEnabled() || !GameplayServerState.isActive()) return
-        if (PartyJoinExecutor.isRunning() || slotCapture.isActive) return
-        if (allowances.isScanning()) {
-            allowanceScanStarted = true
-            return
-        }
-        allowanceScanStarted = allowances.start(client, PartyJoinExecutor::sendCommand)
-    }
-
-    private fun stopAllowanceScan() {
-        if (allowances.isScanning()) allowanceScanStarted = false
-        allowances.stopScan()
+        allowances.markStale()
     }
 
     private fun beginPartyJoin(commandRoot: String, mode: PartyJoinExecutionMode) {
         unselectExhaustedParticipants(commandRoot)
         readiness.reconcileParticipants(selectedClients().mapTo(HashSet()) { it.clientId })
 
-        if (allowances.remaining(commandRoot) == 0) {
+        if (allowances.freshRemaining(commandRoot) == 0) {
             if (mode == PartyJoinExecutionMode.AUTOMATIC && isCoordinator()) {
                 requestAutomaticHandoff(commandRoot)
                 processAutomaticHandoff(MinecraftClient.getInstance())
@@ -321,8 +312,8 @@ object LocalPartyController {
         }
     }
 
-    private fun commitAllowance(cost: PartyAllowanceCost?) {
-        allowances.commit(cost)
+    private fun commitAllowance(attemptId: String, cost: PartyAllowanceCost?) {
+        allowances.commit(cost, attemptId)
         val client = MinecraftClient.getInstance()
         publishPresence(
             client,
@@ -331,7 +322,7 @@ object LocalPartyController {
         )
         if (cost != null && isCoordinator() &&
             RvlAddonsConfigStore.config.partyJoinExecutionMode == PartyJoinExecutionMode.AUTOMATIC &&
-            allowances.remaining(cost.commandRoot) == 0
+            allowances.freshRemaining(cost.commandRoot) == 0
         ) {
             requestAutomaticHandoff(cost.commandRoot)
         }
@@ -395,8 +386,7 @@ object LocalPartyController {
     }
 
     fun onDisconnect(client: MinecraftClient) {
-        allowanceScanStarted = false
-        allowances.reset()
+        allowances.markStale()
         pendingAutomaticHandoffRoot = null
         pendingAutomaticHandoffDeadline = 0L
         slotCapture.reset()
@@ -414,7 +404,8 @@ object LocalPartyController {
         snapshot.clientId != clientId &&
                 snapshot.state == PartyPresenceState.IN_SERVER &&
                 snapshot.serverKey == currentServerKey(client) &&
-                !(snapshot.dchienRunsRemaining == 0 && snapshot.tlTicketsRemaining == 0)
+                !(snapshot.dchienAllowanceFresh && snapshot.dchienRunsRemaining == 0 &&
+                    snapshot.tlAllowanceFresh && snapshot.tlTicketsRemaining == 0)
 
     private fun publishPresence(client: MinecraftClient, state: PartyPresenceState) {
         val currentTransport = transport ?: return
@@ -432,6 +423,8 @@ object LocalPartyController {
                 partyReadyCount = readiness.readyCount(selectedClients(), client),
                 dchienRunsRemaining = allowances.dchienRemaining,
                 tlTicketsRemaining = allowances.tlTicketsRemaining,
+                dchienAllowanceFresh = allowances.dchienFresh,
+                tlAllowanceFresh = allowances.tlFresh,
                 dchienRoomName = RvlAddonsConfigStore.config.partyAutomaticRoomName,
                 tlRoomName = RvlAddonsConfigStore.config.partyTlAutomaticRoomName
             )
@@ -614,10 +607,14 @@ object LocalPartyController {
         return listOf(
             "Role" to role,
             "State" to state,
-            "Doan chien ticket(s)" to (allowances.dchienRemaining?.toString() ?: "?"),
-            "Thanh lan ticket(s)" to (allowances.tlTicketsRemaining?.toString() ?: "?")
+            "Doan chien ticket(s)" to allowanceLabel("dchien"),
+            "Thanh lan ticket(s)" to allowanceLabel("tl")
         )
     }
+
+    private fun allowanceLabel(root: String): String = allowances.remaining(root)?.let {
+        (if (allowances.isFresh(root)) "" else "~") + it
+    } ?: "?"
 
     fun statusText(): String = partyHudLines().joinToString(" | ") { "${it.first}: ${it.second}" }
 
@@ -777,25 +774,6 @@ object LocalPartyController {
             registry.updateSelection(snapshot.clientId, selectedClientIds.contains(snapshot.clientId))
         }
     }
-
-    private fun loadClientId(path: Path): String {
-        val properties = Properties()
-        if (Files.exists(path)) {
-            runCatching { Files.newInputStream(path).use(properties::load) }
-        }
-        val existing = properties.getProperty("clientId")?.takeIf { it.isNotBlank() }
-        if (existing != null) return existing
-        val generated = UUID.randomUUID().toString()
-        runCatching {
-            Files.createDirectories(path.parent)
-            properties["clientId"] = generated
-            Files.newOutputStream(path).use { properties.store(it, "RVL local party identity") }
-        }
-        return generated
-    }
-
-    private fun createRuntimeClientId(path: Path): String =
-        "${loadClientId(path)}-${UUID.randomUUID().toString().take(8)}"
 
     private fun currentServerKey(client: MinecraftClient): String =
         client.currentServerEntry?.address?.trim()?.lowercase().orEmpty()

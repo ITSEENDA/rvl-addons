@@ -60,6 +60,7 @@ object PartyJoinExecutor {
     private var manualMode = false
     private var automaticTypeTargetSignature = ""
     private var automaticTypeRetryRequested = false
+    private var allowanceReader: (String) -> Int? = { null }
 
     private var typeClickNotBefore = 0L
 
@@ -409,6 +410,15 @@ object PartyJoinExecutor {
     ) = manualReplay.recordCoordinatorAction(sequence, intentVersion, type)
 
     internal fun currentRun(): JoinRun? = run
+
+    internal fun freshAllowanceRemaining(commandRoot: String): Int? = allowanceReader(commandRoot)
+
+    internal fun setAllowanceReader(reader: (String) -> Int?) {
+        allowanceReader = reader
+    }
+
+    internal fun allowanceExhaustedReason(commandRoot: String): String =
+        "no ${commandRoot.trim().removePrefix("/").substringBefore(' ').lowercase()} runs remaining"
 
     internal fun currentHandler(): ScreenHandler? {
         return menuDetector.handler()

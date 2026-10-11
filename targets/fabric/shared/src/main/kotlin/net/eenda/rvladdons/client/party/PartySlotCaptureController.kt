@@ -11,7 +11,6 @@ import java.util.Locale
 internal class PartySlotCaptureController(
     private val isCoordinator: () -> Boolean,
     private val isJoinActive: () -> Boolean,
-    private val stopAllowanceScan: () -> Unit,
     private val sendCommand: (String) -> Boolean,
     private val publishCapturedRoom: () -> Unit,
     private val notify: (String) -> Unit
@@ -49,7 +48,6 @@ internal class PartySlotCaptureController(
             return
         }
 
-        stopAllowanceScan()
         stage = Stage.WAITING_TYPE_MENU
         this.commandRoot = root
         initialTypeMenuSyncId = currentMenuSnapshot()?.syncId ?: -1

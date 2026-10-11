@@ -54,6 +54,10 @@ internal class PartyJoinClickTypeState(owner: PartyJoinExecutor) : PartyJoinStat
         val run = owner.currentRun() ?: return
         if (!owner.canClickType()) return
         if (owner.currentHandler()?.syncId != run.menuSyncId) return
+        if (owner.freshAllowanceRemaining(run.command) == 0) {
+            owner.fail(owner.allowanceExhaustedReason(run.command))
+            return
+        }
         clicked = owner.clickSlot(owner.automaticTypeSlot(run.typeSlot))
         if (clicked) owner.markTypeSubmitted()
         if (!clicked) owner.fail("type menu unavailable")

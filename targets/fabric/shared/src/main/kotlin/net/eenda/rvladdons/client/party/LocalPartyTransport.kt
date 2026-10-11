@@ -670,7 +670,9 @@ internal class LocalPartyTransport(
         snapshot.dchienRunsRemaining?.toString() ?: "",
         snapshot.tlTicketsRemaining?.toString() ?: "",
         snapshot.dchienRoomName,
-        snapshot.tlRoomName
+        snapshot.tlRoomName,
+        snapshot.dchienAllowanceFresh.toString(),
+        snapshot.tlAllowanceFresh.toString()
     )
 
     private fun snapshotFrom(fields: List<String>): PartyClientSnapshot? {
@@ -692,7 +694,9 @@ internal class LocalPartyTransport(
             dchienRunsRemaining = fields.getOrNull(10)?.toIntOrNull(),
             tlTicketsRemaining = fields.getOrNull(11)?.toIntOrNull(),
             dchienRoomName = fields.getOrNull(12).orEmpty(),
-            tlRoomName = fields.getOrNull(13).orEmpty()
+            tlRoomName = fields.getOrNull(13).orEmpty(),
+            dchienAllowanceFresh = fields.getOrNull(14)?.toBooleanStrictOrNull() ?: false,
+            tlAllowanceFresh = fields.getOrNull(15)?.toBooleanStrictOrNull() ?: false
         )
     }
 }
