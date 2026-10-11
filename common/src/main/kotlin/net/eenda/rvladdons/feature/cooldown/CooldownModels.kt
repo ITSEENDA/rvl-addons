@@ -1,5 +1,18 @@
 package net.eenda.rvladdons.feature.cooldown
 
+data class SkillProfile(
+    val skillKey: String = "",
+    var label: String = "",
+    val setId: String? = null,
+    val trigger: SkillTrigger = SkillTrigger.UNKNOWN,
+    val sourceFingerprint: String = "",
+    var sourceType: SkillSourceType = SkillSourceType.ITEM,
+    var enabled: Boolean = true,
+    var cooldownHintMs: Long? = null,
+    var skillType: SkillType = SkillType.UNKNOWN,
+    var setBonusLevel: Int? = null
+)
+
 enum class CooldownConfidence {
     CONFIRMED,
     ESTIMATED

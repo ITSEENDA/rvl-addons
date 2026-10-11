@@ -24,7 +24,10 @@ object LocalPartyController {
     private val synchronizedCommandRoots = setOf("dchien", "tl")
     private const val ID_FILE = "rvl-addons-party.properties"
     private const val PREPARE_TIMEOUT_MS = 2_000L
-    private val partyStatePath = FabricLoader.getInstance().configDir.resolve(ID_FILE)
+    private val partyStatePath = FabricLoader.getInstance().gameDir
+        .resolve("rvl-addons-data")
+        .resolve("party-state.json")
+    private val legacyPartyStatePath = FabricLoader.getInstance().configDir.resolve(ID_FILE)
     private val registry = PartyRegistry()
     private var transport: LocalPartyTransport? = null
     private var clientId = ""
@@ -136,7 +139,7 @@ object LocalPartyController {
             current.stop()
             transport = null
         }
-        clientId = "${PartyStateStore.loadOrCreateClientId(partyStatePath)}-${UUID.randomUUID().toString().take(8)}"
+        clientId = "${PartyStateStore.loadOrCreateClientId(partyStatePath, legacyPartyStatePath)}-${UUID.randomUUID().toString().take(8)}"
         PartyJoinExecutor.setAllowanceReader(allowances::freshRemaining)
         transport = LocalPartyTransport(
             PartyTransportCallbacks(

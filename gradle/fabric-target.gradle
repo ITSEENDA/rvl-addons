@@ -42,8 +42,10 @@ repositories {
 }
 
 sourceSets.main.kotlin.srcDir(rootProject.file('targets/fabric/shared/src/main/kotlin'))
+sourceSets.test.kotlin.srcDir(rootProject.file('targets/fabric/shared/src/test/kotlin'))
 
 dependencies {
+	testImplementation 'junit:junit:4.13.2'
 	minecraft "com.mojang:minecraft:${minecraftVersion}"
 	mappings "net.fabricmc:yarn:${yarnMappings}:v2"
 	modImplementation "net.fabricmc:fabric-loader:${loaderVersion}"
