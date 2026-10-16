@@ -3,30 +3,83 @@ package net.eenda.rvladdons.feature.cooldown
 import net.eenda.rvladdons.client.storage.JsonFileStore
 import net.eenda.rvladdons.core.AccountStorage
 import net.eenda.rvladdons.core.RvlTextMatcher
+import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardCopyOption
 import java.util.UUID
+import java.util.Properties
 import java.util.Locale
 
 object SkillProfileStore {
+    private const val LEGACY_PROFILE_FILE = "rvl-addons-skill-profiles.properties"
+    private const val LEGACY_PROFILE_DIRECTORY = "rvl-addons-skill-profiles"
+
     private val profiles = LinkedHashMap<String, SkillProfile>()
     private var path: Path? = null
 
     @Synchronized
-    fun load(profilePath: Path) {
+    fun load(profilePath: Path, legacyAccountPath: Path? = null, legacyPath: Path? = null) {
         path = profilePath
         profiles.clear()
-        JsonFileStore.read(profilePath, Array<SkillProfile>::class.java)
-            ?.filterNotNull()
-            ?.filter { it.skillKey.isNotBlank() }
-            ?.forEach { profiles[it.skillKey] = it }
-        if (deduplicateInternal()) save()
+        val jsonProfiles = JsonFileStore.read(profilePath, Array<SkillProfile>::class.java)
+        val legacySource = if (jsonProfiles == null) {
+            listOfNotNull(legacyAccountPath, legacyPath).firstOrNull(Files::exists)
+        } else {
+            null
+        }
+        if (jsonProfiles != null) {
+            jsonProfiles.filterNotNull().filter { it.skillKey.isNotBlank() }
+                .forEach { profiles[it.skillKey] = it }
+        } else if (legacySource != null) {
+            readLegacyProfiles(legacySource)
+        }
+
+        if (deduplicateInternal() || legacySource != null) save()
+        legacySource?.let(::archive)
+    }
+
+    private fun readLegacyProfiles(path: Path) {
+        val properties = Properties()
+        Files.newInputStream(path).use(properties::load)
+        val count = properties.getProperty("profile.count")?.toIntOrNull()?.coerceIn(0, 10_000) ?: 0
+        repeat(count) { index ->
+            val key = properties.getProperty("profile.$index.key") ?: return@repeat
+            profiles[key] = SkillProfile(
+                skillKey = key,
+                label = properties.getProperty("profile.$index.label") ?: key,
+                setId = properties.getProperty("profile.$index.setId")?.ifBlank { null },
+                trigger = properties.getProperty("profile.$index.trigger")
+                    ?.let { runCatching { SkillTrigger.valueOf(it) }.getOrNull() }
+                    ?: SkillTrigger.UNKNOWN,
+                sourceFingerprint = properties.getProperty("profile.$index.fingerprint").orEmpty(),
+                sourceType = properties.getProperty("profile.$index.sourceType")
+                    ?.let { runCatching { SkillSourceType.valueOf(it) }.getOrNull() }
+                    ?: SkillSourceType.ITEM,
+                skillType = properties.getProperty("profile.$index.skillType")
+                    ?.let { runCatching { SkillType.valueOf(it) }.getOrNull() }
+                    ?: SkillType.UNKNOWN,
+                setBonusLevel = properties.getProperty("profile.$index.setBonusLevel")?.toIntOrNull(),
+                enabled = properties.getProperty("profile.$index.enabled")?.toBooleanStrictOrNull() ?: true,
+                cooldownHintMs = properties.getProperty("profile.$index.cooldownMs")?.toLongOrNull()
+            )
+        }
     }
 
     fun accountProfilePath(dataDir: Path, uuid: UUID?, username: String): Path =
         AccountStorage.directory(dataDir, uuid, username).resolve("skill-profiles.json")
 
-    fun accountId(uuid: UUID?, username: String): String =
-        (uuid ?: UUID.nameUUIDFromBytes("OfflinePlayer:$username".toByteArray(Charsets.UTF_8))).toString()
+    fun legacyAccountProfilePath(configDir: Path, uuid: UUID?, username: String): Path =
+        AccountStorage.path(configDir, LEGACY_PROFILE_DIRECTORY, uuid, username)
+
+    fun accountId(uuid: UUID?, username: String): String = AccountStorage.accountId(uuid, username)
+
+    fun legacyProfilePath(configDir: Path): Path = configDir.resolve(LEGACY_PROFILE_FILE)
+
+    private fun archive(path: Path) {
+        if (Files.exists(path)) {
+            Files.move(path, path.resolveSibling("${path.fileName}.legacy"), StandardCopyOption.REPLACE_EXISTING)
+        }
+    }
 
     @Synchronized
     fun register(descriptor: SkillDescriptor, sourceType: SkillSourceType = SkillSourceType.ITEM): SkillProfile = register(

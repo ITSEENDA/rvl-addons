@@ -16,7 +16,8 @@ enum class HudComponent {
     STATUS,
     TRACE,
     COOLDOWN,
-    COMA
+    COMA,
+    PARTY
 }
 
 data class HudLayout(

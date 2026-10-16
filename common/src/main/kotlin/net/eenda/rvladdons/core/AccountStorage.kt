@@ -4,6 +4,9 @@ import java.nio.file.Path
 import java.util.UUID
 
 object AccountStorage {
+    fun path(configDir: Path, directory: String, uuid: UUID?, username: String): Path =
+        configDir.resolve(directory).resolve("${accountId(uuid, username)}.properties")
+
     fun directory(dataDir: Path, uuid: UUID?, username: String): Path =
         dataDir.resolve("accounts").resolve(accountId(uuid, username))
 

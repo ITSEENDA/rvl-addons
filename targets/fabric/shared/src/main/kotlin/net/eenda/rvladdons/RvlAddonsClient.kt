@@ -12,9 +12,12 @@ import net.eenda.rvladdons.client.config.RvlAddonsConfigScreen
 import net.eenda.rvladdons.client.cooldown.CooldownController
 import net.eenda.rvladdons.client.hud.RvlAddonsHudRenderer
 import net.eenda.rvladdons.client.revive.AutoReviveController
+import net.eenda.rvladdons.client.party.LocalPartyController
+import net.eenda.rvladdons.client.party.PartyScreen
 import net.fabricmc.api.ClientModInitializer
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper
+import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents
 import net.fabricmc.fabric.api.client.message.v1.ClientSendMessageEvents
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents
 import net.fabricmc.loader.api.FabricLoader
@@ -33,6 +36,7 @@ object RvlAddonsClient : ClientModInitializer {
     private lateinit var modToggleKey: KeyBinding
     private lateinit var settingsKey: KeyBinding
     private lateinit var comaSwapKey: KeyBinding
+    private lateinit var partyKey: KeyBinding
 
     override fun onInitializeClient() {
         val configDir = FabricLoader.getInstance().configDir
@@ -42,11 +46,21 @@ object RvlAddonsClient : ClientModInitializer {
         Files.createDirectories(accountDir)
         RvlAddonsConfigStore.load(
             configDir.resolve("rvl-addons.properties"),
-            accountDir.resolve("coma-profiles.json")
+            accountDir.resolve("coma-profiles.json"),
+            AccountStorage.path(configDir, "rvl-addons-coma-profiles", session.uuidOrNull, session.username)
         )
-        ComaStateStore.load(accountDir.resolve("coma-state.json"))
-        SkillProfileStore.load(SkillProfileStore.accountProfilePath(dataDir, session.uuidOrNull, session.username))
+        ComaStateStore.load(
+            accountDir.resolve("coma-state.json"),
+            AccountStorage.path(configDir, "rvl-addons-coma-state", session.uuidOrNull, session.username),
+            configDir.resolve("rvl-addons-coma-state.properties")
+        )
+        SkillProfileStore.load(
+            SkillProfileStore.accountProfilePath(dataDir, session.uuidOrNull, session.username),
+            SkillProfileStore.legacyAccountProfilePath(configDir, session.uuidOrNull, session.username),
+            SkillProfileStore.legacyProfilePath(configDir)
+        )
         ModEnabledState.set(RvlAddonsConfigStore.config.enabled)
+        LocalPartyController.initialize()
         RvlAddonsHudRenderer.register()
         AutoReviveController.registerKeyBinding()
 
@@ -82,15 +96,34 @@ object RvlAddonsClient : ClientModInitializer {
                 "category.rvl-addons"
             )
         )
+        partyKey = KeyBindingHelper.registerKeyBinding(
+            KeyBinding(
+                "key.rvl-addons.open_party",
+                InputUtil.Type.KEYSYM,
+                GLFW.GLFW_KEY_P,
+                "category.rvl-addons"
+            )
+        )
         ClientSendMessageEvents.CHAT.register { message ->
             RvlAddonsTrace.log("chat-out", message)
+        }
+
+        ClientSendMessageEvents.ALLOW_COMMAND.register { command ->
+            val allowed = LocalPartyController.handleOutgoingCommand(command)
+            if (!allowed) RvlAddonsTrace.log("command-out", "$command [party-intercepted]")
+            allowed
         }
 
         ClientSendMessageEvents.COMMAND.register { command ->
             RvlAddonsTrace.log("command-out", command)
         }
 
+        ClientReceiveMessageEvents.GAME.register { message, _ ->
+            LocalPartyController.handleJoinChat(message.string)
+        }
+
         ClientPlayConnectionEvents.JOIN.register { _, _, client ->
+            LocalPartyController.onJoin(client)
             ComaSwapController.reset()
             CooldownController.clear()
             AutoReviveController.reset()
@@ -98,6 +131,7 @@ object RvlAddonsClient : ClientModInitializer {
         }
 
         ClientPlayConnectionEvents.DISCONNECT.register { _, client ->
+            LocalPartyController.onDisconnect(client)
             ComaSwapController.persistCurrentState(client)
             ComaSwapController.reset()
             CooldownController.clear()
@@ -119,6 +153,10 @@ object RvlAddonsClient : ClientModInitializer {
                 ComaSwapController.requestSwap(client)
             }
             AutoReviveController.handleKeyBinding()
+            while (partyKey.wasPressed()) {
+                if (ModEnabledState.isEnabled()) client.setScreen(PartyScreen(client.currentScreen))
+            }
+            LocalPartyController.tick(client)
             CooldownController.observeInputTransitions(client)
             AutoReviveController.tick(client)
             ComaSwapController.tick(client)
@@ -135,6 +173,7 @@ object RvlAddonsClient : ClientModInitializer {
     }
 
     private fun setGameplayServerActive(active: Boolean) {
+        val wasActive = GameplayServerState.isActive()
         if (lastReportedState != active) {
             logger.info("Gameplay server active: {}", active)
             RvlAddonsTrace.log("state", "gameplayServerActive=$active")
@@ -145,12 +184,18 @@ object RvlAddonsClient : ClientModInitializer {
             lastReportedState = active
         }
         GameplayServerState.update(active)
+        if (active && !wasActive) LocalPartyController.onGameplayServerDetected()
+        if (!active && wasActive) LocalPartyController.onGameplayServerLeft()
     }
 
     private fun toggleMod() {
         val enabled = ModEnabledState.toggle()
         RvlAddonsConfigStore.config.enabled = enabled
         RvlAddonsConfigStore.save()
+        LocalPartyController.setEnabled(enabled)
+        if (!enabled && MinecraftClient.getInstance().currentScreen is PartyScreen) {
+            MinecraftClient.getInstance().setScreen(null)
+        }
         logger.info("RVL Addons enabled: {}", enabled)
         RvlAddonsTrace.log("mod-state", "enabled=$enabled")
         MinecraftClient.getInstance().inGameHud.setOverlayMessage(

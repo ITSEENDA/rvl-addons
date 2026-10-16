@@ -1,0 +1,96 @@
+package net.eenda.rvladdons.feature.party
+
+enum class PartyPresenceState {
+    CONNECTED,
+    IN_SERVER,
+    MAIN_MENU,
+    DISCONNECTED
+}
+
+enum class PartyAttemptState {
+    IDLE,
+    PREPARING,
+    READY,
+    JOINING,
+    JOINED,
+    FAILED
+}
+
+enum class PartyMenuStage {
+    UNKNOWN,
+    TYPE_MENU,
+    ROOM_MENU,
+    AUTO_JOINED,
+    JOINED
+}
+
+enum class PartyManualActionType {
+    SELECT_TYPE,
+    SELECT_ROOM
+}
+
+data class PartyClientSnapshot(
+    val clientId: String,
+    val name: String,
+    val state: PartyPresenceState,
+    val serverKey: String,
+    val modVersion: String,
+    val selected: Boolean = false,
+    val lastSeenAt: Long = System.currentTimeMillis(),
+    val isCoordinator: Boolean = false,
+    val partyState: PartyAttemptState = PartyAttemptState.IDLE,
+    val partySelectedCount: Int = 0,
+    val partyReadyCount: Int = 0,
+    val dchienRunsRemaining: Int? = null,
+    val tlTicketsRemaining: Int? = null,
+    val dchienAllowanceFresh: Boolean = false,
+    val tlAllowanceFresh: Boolean = false,
+    val dchienRoomName: String = "",
+    val tlRoomName: String = ""
+) {
+    fun runsRemaining(commandRoot: String): Int? =
+        if (commandRoot.trim().removePrefix("/").substringBefore(' ').equals("tl", ignoreCase = true)) {
+            tlTicketsRemaining.takeIf { tlAllowanceFresh }
+        } else {
+            dchienRunsRemaining.takeIf { dchienAllowanceFresh }
+        }
+}
+
+data class PartyManualAction(
+    val sequence: Int,
+    val slot: Int,
+    val button: Int,
+    val action: String,
+    val intentVersion: Int = 0,
+    val type: PartyManualActionType = PartyManualActionType.SELECT_TYPE,
+    val targetSignature: String = ""
+)
+
+class PartyRegistry {
+    private val clients = linkedMapOf<String, PartyClientSnapshot>()
+
+    @Synchronized
+    fun replace(values: Collection<PartyClientSnapshot>) {
+        clients.clear()
+        values.forEach { clients[it.clientId] = it }
+    }
+
+    @Synchronized
+    fun upsert(value: PartyClientSnapshot) {
+        clients[value.clientId] = value
+    }
+
+    @Synchronized
+    fun updateSelection(clientId: String, selected: Boolean) {
+        clients[clientId]?.let { clients[clientId] = it.copy(selected = selected) }
+    }
+
+    @Synchronized
+    fun snapshot(): List<PartyClientSnapshot> = clients.values.toList()
+
+    @Synchronized
+    fun selected(): List<PartyClientSnapshot> = clients.values.filter { it.selected }
+
+    @Synchronized
+    fun get(clientId: String): PartyClientSnapshot? = clients[clientId]
+}

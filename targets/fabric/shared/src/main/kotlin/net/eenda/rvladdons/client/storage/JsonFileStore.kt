@@ -12,9 +12,7 @@ internal object JsonFileStore {
 
     fun <T> read(path: Path, type: Class<T>): T? {
         if (!Files.exists(path)) return null
-        return runCatching {
-            Files.newBufferedReader(path).use { gson.fromJson(it, type) }
-        }.getOrNull()
+        return runCatching { Files.newBufferedReader(path).use { gson.fromJson(it, type) } }.getOrNull()
     }
 
     fun write(path: Path, value: Any) {
