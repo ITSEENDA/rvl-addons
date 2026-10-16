@@ -84,8 +84,9 @@ object LocalPartyController {
         activePartyClientIds = ::activePartyClientIds,
         setAttemptState = { attemptState = it },
         commitAllowance = ::commitAllowance,
+        requestAllowanceRefresh = allowances::requestRefresh,
         unselectExhaustedClient = ::unselectExhaustedClient,
-        localRunsRemaining = allowances::remaining,
+        localRunsRemaining = allowances::freshRemaining,
         onCoordinatorExhausted = { root ->
             requestAutomaticHandoff(root)
             processAutomaticHandoff(MinecraftClient.getInstance())
@@ -201,6 +202,10 @@ object LocalPartyController {
             }
             return
         }
+        PartyJoinExecutor.currentRun()
+            ?.takeIf { it.roomSubmitted }
+            ?.command
+            ?.let(allowances::requestRefresh)
         allowances.markStale()
         slotCapture.reset()
         pendingAutomaticHandoffRoot = null
@@ -269,7 +274,7 @@ object LocalPartyController {
         readiness.reconcileParticipants(selectedClients().mapTo(HashSet()) { it.clientId })
 
         if (allowances.freshRemaining(commandRoot) == 0) {
-            if (mode == PartyJoinExecutionMode.AUTOMATIC && isCoordinator()) {
+            if (mode == PartyJoinExecutionMode.AUTOMATIC && isCoordinator() && selectedClients().isNotEmpty()) {
                 requestAutomaticHandoff(commandRoot)
                 processAutomaticHandoff(MinecraftClient.getInstance())
             } else {
@@ -278,11 +283,6 @@ object LocalPartyController {
                     false
                 )
             }
-            return
-        }
-
-        if (selectedClients().isEmpty()) {
-            PartyJoinExecutor.sendCommand(commandRoot)
             return
         }
         joinCoordinator.begin(commandRoot, mode)
@@ -389,6 +389,10 @@ object LocalPartyController {
     }
 
     fun onDisconnect(client: MinecraftClient) {
+        PartyJoinExecutor.currentRun()
+            ?.takeIf { it.roomSubmitted }
+            ?.command
+            ?.let(allowances::requestRefresh)
         allowances.markStale()
         pendingAutomaticHandoffRoot = null
         pendingAutomaticHandoffDeadline = 0L
@@ -603,9 +607,9 @@ object LocalPartyController {
             else -> "CLIENT"
         }
         val state = if (!isCoordinator() && coordinator != null) {
-            coordinator.partyState.name
+            partyStateLabel(coordinator.partyState)
         } else {
-            attemptState.name
+            partyStateLabel(attemptState)
         }
         return listOf(
             "Role" to role,
@@ -618,6 +622,15 @@ object LocalPartyController {
     private fun allowanceLabel(root: String): String = allowances.remaining(root)?.let {
         (if (allowances.isFresh(root)) "" else "~") + it
     } ?: "?"
+
+    private fun partyStateLabel(state: PartyAttemptState): String = when (state) {
+        PartyAttemptState.IDLE -> "Not ready"
+        PartyAttemptState.PREPARING -> "Preparing"
+        PartyAttemptState.READY -> "Ready"
+        PartyAttemptState.JOINING -> "Joining"
+        PartyAttemptState.JOINED -> "Joined"
+        PartyAttemptState.FAILED -> "Failed"
+    }
 
     fun statusText(): String = partyHudLines().joinToString(" | ") { "${it.first}: ${it.second}" }
 

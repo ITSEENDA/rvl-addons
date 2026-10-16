@@ -34,7 +34,6 @@ internal class PartyCommandRouter(
                 showWaiting()
                 return false
             }
-            if (selectedCount() == 0) return true
             startJoin(root, mode())
             return false
         }

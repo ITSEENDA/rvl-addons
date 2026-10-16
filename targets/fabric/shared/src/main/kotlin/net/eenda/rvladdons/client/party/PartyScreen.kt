@@ -5,12 +5,12 @@ import dev.tako.libs.client.ui.core.TakoTheme
 import dev.tako.libs.client.ui.layout.*
 import dev.tako.libs.client.ui.widget.TakoButton
 import net.eenda.rvladdons.core.RvlAddonsConfigStore
+import net.eenda.rvladdons.feature.party.PartyAttemptState
 import net.eenda.rvladdons.feature.party.PartyClientSnapshot
 import net.eenda.rvladdons.feature.party.PartyJoinExecutionMode
 import net.minecraft.client.gui.DrawContext
 import net.minecraft.client.gui.Drawable
 import net.minecraft.client.gui.screen.Screen
-import net.minecraft.client.gui.widget.ButtonWidget
 import net.minecraft.client.gui.widget.ClickableWidget
 import net.minecraft.text.Text
 
@@ -28,6 +28,9 @@ class PartyScreen(private val parent: Screen?) : Screen(Text.literal("Local Clon
 
     private var scrollState = TakoScrollState(ROW_HEIGHT.toDouble())
     private var primaryHitBoxes = emptyList<PrimaryHitBox>()
+    private var selectButton: TakoButton? = null
+    private var prepareButton: TakoButton? = null
+    private var cancelButton: TakoButton? = null
 
     private companion object {
         const val PANEL_X = 24
@@ -75,17 +78,22 @@ class PartyScreen(private val parent: Screen?) : Screen(Text.literal("Local Clon
                 captureGap,
                 listOf(captureDchien, captureTl)
             )
+        }
 
+        if (coordinator) {
             val actionsY = height - if (isCompact()) 54 else 30
-            val select = ButtonWidget.builder(Text.literal("Select eligible")) {
+            val select = TakoButton("Select all eligible", 0, 0, 108, onPress = {
                 client?.let(LocalPartyController::selectAllEligible)
-            }.dimensions(0, 0, 108, 20).build()
-            val prepare = ButtonWidget.builder(Text.literal("Prepare party")) {
+            }, textRenderer = textRenderer)
+            val prepare = TakoButton("Prepare selected", 0, 0, 100, onPress = {
                 client?.let(LocalPartyController::startPreparation)
-            }.dimensions(0, 0, 90, 20).build()
-            val cancel = ButtonWidget.builder(Text.literal("Cancel")) {
+            }, textRenderer = textRenderer)
+            val cancel = TakoButton("Cancel session", 0, 0, 100, onPress = {
                 client?.let(LocalPartyController::cancelPreparation)
-            }.dimensions(0, 0, 70, 20).build()
+            }, textRenderer = textRenderer)
+            selectButton = select
+            prepareButton = prepare
+            cancelButton = cancel
             addFlexRow(
                 TakoBounds(16, actionsY, width - 32, 20),
                 4,
@@ -93,9 +101,9 @@ class PartyScreen(private val parent: Screen?) : Screen(Text.literal("Local Clon
             )
         }
 
-        addDrawableChild(ButtonWidget.builder(Text.literal("Close")) {
+        addDrawableChild(TakoButton("Close", width - 94, height - 30, 70, onPress = {
             close()
-        }.dimensions(width - 94, height - 30, 70, 20).build())
+        }, textRenderer = textRenderer))
     }
 
     override fun render(context: DrawContext, mouseX: Int, mouseY: Int, delta: Float) {
@@ -104,6 +112,12 @@ class PartyScreen(private val parent: Screen?) : Screen(Text.literal("Local Clon
 
         val coordinator = LocalPartyController.isCoordinator()
         val clients = LocalPartyController.clients()
+        val partyState = LocalPartyController.currentState()
+        selectButton?.visible = clients.isNotEmpty()
+        prepareButton?.visible = clients.isNotEmpty()
+        prepareButton?.active = clients.isNotEmpty() && LocalPartyController.selectedCount() > 0 &&
+            partyState != PartyAttemptState.PREPARING && partyState != PartyAttemptState.JOINING
+        cancelButton?.visible = partyState != PartyAttemptState.IDLE
         val listTop = clientListTop(coordinator)
         val visibleCount = visibleRowCount(clients.size, coordinator)
         scrollState.update(clients.size * ROW_HEIGHT, visibleCount * ROW_HEIGHT)
@@ -124,22 +138,16 @@ class PartyScreen(private val parent: Screen?) : Screen(Text.literal("Local Clon
         )
 
         val header = if (coordinator) {
-            "Loopback coordinator: primary"
+            "Coordinator: Primary"
         } else {
             "Joined coordinator: ${LocalPartyController.coordinatorName()}"
         }
-        val hint = (if (coordinator) {
-            "Click row to select; SET PRIMARY transfers coordinator"
-        } else {
-            "Client party view"
-        }) + if (clients.size > visibleCount) " | Scroll to browse" else ""
         drawLabel(context, header, PANEL_X + 8, PANEL_Y + 8, width - PANEL_X * 2 - 16, TakoTheme.TEXT_SECONDARY)
-        drawLabel(context, hint, PANEL_X + 8, PANEL_Y + 24, width - PANEL_X * 2 - 16, TakoTheme.TEXT_SECONDARY)
 
         val (dchienRoom, tlRoom) = LocalPartyController.capturedRoomNames()
         val rooms = "Doan chien room: ${dchienRoom.ifBlank { "Not captured" }}  |  " +
                 "Thanh lan room: ${tlRoom.ifBlank { "Not captured" }}"
-        drawLabel(context, rooms, PANEL_X + 8, PANEL_Y + 34, width - PANEL_X * 2 - 16, TakoTheme.TEXT_SECONDARY)
+        drawLabel(context, rooms, PANEL_X + 8, PANEL_Y + 24, width - PANEL_X * 2 - 16, TakoTheme.TEXT_SECONDARY)
 
         primaryHitBoxes = emptyList()
         if (clients.isEmpty()) {
@@ -317,7 +325,7 @@ class PartyScreen(private val parent: Screen?) : Screen(Text.literal("Local Clon
         row.layout(bounds)
     }
 
-    private fun isCompact(): Boolean = width < 390
+    private fun isCompact(): Boolean = width < 430
 
     private fun footerHeight(coordinator: Boolean): Int =
         if (coordinator && isCompact()) COMPACT_FOOTER_HEIGHT else FOOTER_HEIGHT
@@ -325,7 +333,10 @@ class PartyScreen(private val parent: Screen?) : Screen(Text.literal("Local Clon
     private fun showCaptureButtons(coordinator: Boolean): Boolean =
         coordinator && RvlAddonsConfigStore.config.partyJoinExecutionMode == PartyJoinExecutionMode.AUTOMATIC
 
-    private fun clientListTop(coordinator: Boolean): Int = PANEL_Y + if (coordinator) 76 else 64
+    private fun clientListTop(coordinator: Boolean): Int = PANEL_Y + when {
+        coordinator && showCaptureButtons(coordinator) -> 76
+        else -> 50
+    }
 
     private fun visibleRowCount(total: Int, coordinator: Boolean): Int {
         if (total == 0) return 0

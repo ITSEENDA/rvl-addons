@@ -100,17 +100,41 @@ internal class PartyAllowanceTracker {
 
     fun commit(cost: PartyAllowanceCost?, attemptId: String) {
         cost ?: return
-        if (attemptId.isBlank() || !committedAttempts.add(attemptId)) return
+        val root = normalizeRoot(cost.commandRoot)
+        if ((root != "dchien" && root != "tl") || attemptId.isBlank() ||
+            !committedAttempts.add(attemptId)
+        ) return
         while (committedAttempts.size > MAX_REMEMBERED_ATTEMPTS) {
             committedAttempts.remove(committedAttempts.first())
         }
 
-        when (normalizeRoot(cost.commandRoot)) {
+        if (!isFresh(root)) {
+            requestRefresh(root)
+            return
+        }
+
+        when (root) {
             "dchien" -> dchienRemaining = dchienRemaining?.minus(cost.amount)?.coerceAtLeast(0)
             "tl" -> tlTicketsRemaining = tlTicketsRemaining?.minus(cost.amount)?.coerceAtLeast(0)
-            else -> return
         }
-        persist(cost.commandRoot)
+        persist(root)
+    }
+
+    fun requestRefresh(commandRoot: String) {
+        val root = normalizeRoot(commandRoot)
+        if (root != "dchien" && root != "tl") return
+        when (root) {
+            "dchien" -> {
+                dchienFresh = false
+                dchienObservedAt = 0L
+            }
+            "tl" -> {
+                tlFresh = false
+                tlObservedAt = 0L
+            }
+        }
+        persist(root)
+        if (scanningRoot != root && root !in refreshQueue) refreshQueue.addFirst(root)
     }
 
     /** Refreshes expired caches on connect; otherwise only observes menus already opened by the player. */

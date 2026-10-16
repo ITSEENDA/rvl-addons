@@ -466,6 +466,8 @@ object PartyJoinExecutor {
         manualReplay.onFailure(reason)
     }
 
+    internal fun joinFailureReason(): String = failureReason ?: "join failed"
+
     internal fun debugPhase(message: String) {
         manualReplay.debugPhase(message)
     }

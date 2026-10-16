@@ -168,6 +168,6 @@ internal class PartyJoinCompletedState(owner: PartyJoinExecutor) : PartyJoinStat
 
 internal class PartyJoinFailedState(owner: PartyJoinExecutor) : PartyJoinState(owner) {
     override fun onEnter() {
-        owner.complete(false, "join failed")
+        owner.complete(false, owner.joinFailureReason())
     }
 }
