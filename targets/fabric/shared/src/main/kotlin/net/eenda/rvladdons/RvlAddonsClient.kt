@@ -24,6 +24,7 @@ import net.minecraft.client.util.InputUtil
 import net.minecraft.text.Text
 import org.lwjgl.glfw.GLFW
 import org.slf4j.LoggerFactory
+import java.nio.file.Files
 
 object RvlAddonsClient : ClientModInitializer {
     private val logger = LoggerFactory.getLogger("rvl-addons/gameplay-detector")
@@ -35,19 +36,16 @@ object RvlAddonsClient : ClientModInitializer {
 
     override fun onInitializeClient() {
         val configDir = FabricLoader.getInstance().configDir
+        val dataDir = FabricLoader.getInstance().gameDir.resolve("rvl-addons-data")
         val session = MinecraftClient.getInstance().session
+        val accountDir = AccountStorage.directory(dataDir, session.uuidOrNull, session.username)
+        Files.createDirectories(accountDir)
         RvlAddonsConfigStore.load(
             configDir.resolve("rvl-addons.properties"),
-            AccountStorage.path(configDir, "rvl-addons-coma-profiles", session.uuidOrNull, session.username)
+            accountDir.resolve("coma-profiles.json")
         )
-        ComaStateStore.load(
-            AccountStorage.path(configDir, "rvl-addons-coma-state", session.uuidOrNull, session.username),
-            ComaStateStore.legacyStatePath(configDir)
-        )
-        SkillProfileStore.load(
-            SkillProfileStore.accountProfilePath(configDir, session.uuidOrNull, session.username),
-            SkillProfileStore.legacyProfilePath(configDir)
-        )
+        ComaStateStore.load(accountDir.resolve("coma-state.json"))
+        SkillProfileStore.load(SkillProfileStore.accountProfilePath(dataDir, session.uuidOrNull, session.username))
         ModEnabledState.set(RvlAddonsConfigStore.config.enabled)
         RvlAddonsHudRenderer.register()
         AutoReviveController.registerKeyBinding()
