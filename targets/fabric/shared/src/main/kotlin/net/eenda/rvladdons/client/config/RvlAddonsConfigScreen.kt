@@ -35,6 +35,10 @@ object RvlAddonsConfigScreen {
                     .controller { BooleanControllerBuilder.create(it).coloured(true).onOffFormatter() }
                     .build()
             )
+            .build()
+
+        val hud = ConfigCategory.createBuilder()
+            .name(Text.literal("HUD"))
             .option(
                 ButtonOption.createBuilder()
                     .name(Text.literal("Edit HUD layout"))
@@ -45,10 +49,6 @@ object RvlAddonsConfigScreen {
                     }
                     .build()
             )
-            .build()
-
-        val hud = ConfigCategory.createBuilder()
-            .name(Text.literal("HUD"))
             .option(
                 Option.createBuilder<Boolean>()
                     .name(Text.literal("Show RVL status"))

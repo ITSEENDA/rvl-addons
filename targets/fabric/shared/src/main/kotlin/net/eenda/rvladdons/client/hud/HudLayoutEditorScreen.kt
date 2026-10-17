@@ -2,14 +2,10 @@ package net.eenda.rvladdons.client.hud
 
 import dev.tako.libs.client.ui.editor.TakoEditCommand
 import dev.tako.libs.client.ui.editor.TakoUndoRedoHistory
+import dev.tako.libs.client.ui.input.TakoDropdown
 import dev.tako.libs.client.ui.widget.TakoButtonIcon
 import dev.tako.libs.client.ui.widget.TakoIconButton
-import net.eenda.rvladdons.core.HudAnchor
-import net.eenda.rvladdons.core.HudComponent
-import net.eenda.rvladdons.core.HudLayout
-import net.eenda.rvladdons.core.HudLayoutMath
-import net.eenda.rvladdons.core.HudRect
-import net.eenda.rvladdons.core.RvlAddonsConfigStore
+import net.eenda.rvladdons.core.*
 import net.minecraft.client.MinecraftClient
 import net.minecraft.client.gui.DrawContext
 import net.minecraft.client.gui.screen.Screen
@@ -46,34 +42,50 @@ class HudLayoutEditorScreen(private val parent: Screen?) : Screen(Text.literal("
     private var resizeBaseWidth = 0
     private var resizeBaseHeight = 0
     private val history = TakoUndoRedoHistory()
+    private val panelIconButtons = mutableListOf<TakoIconButton>()
     private var undoButton: TakoIconButton? = null
     private var redoButton: TakoIconButton? = null
+    private var horizontalAnchorDropdown: TakoDropdown<String>? = null
+    private var verticalAnchorDropdown: TakoDropdown<String>? = null
     private var editComponent: HudComponent? = null
     private var editStartLayout: HudLayout? = null
-    private val anchorButtons = linkedMapOf<HudAnchor, ButtonWidget>()
 
     override fun init() {
-        addDrawableChild(TakoIconButton(TakoButtonIcon.ZOOM_OUT, Text.literal("Zoom out"), width - 78, 92) {
+        val panelX = width - 210
+        val panelY = 44
+        val zoomOut = TakoIconButton(TakoButtonIcon.ZOOM_OUT, Text.literal("Zoom out"), width - 78, 92) {
             adjustScale(-0.05f)
-        })
-        addDrawableChild(TakoIconButton(TakoButtonIcon.ZOOM_IN, Text.literal("Zoom in"), width - 48, 92) {
+        }
+        val zoomIn = TakoIconButton(TakoButtonIcon.ZOOM_IN, Text.literal("Zoom in"), width - 48, 92) {
             adjustScale(0.05f)
-        })
+        }
+        panelIconButtons += listOf(zoomOut, zoomIn)
+        addDrawableChild(zoomOut)
+        addDrawableChild(zoomIn)
 
-        val undo = TakoIconButton(TakoButtonIcon.UNDO, Text.literal("Undo"), width - 210, 126) { history.undo() }
-        val redo = TakoIconButton(TakoButtonIcon.REDO, Text.literal("Redo"), width - 184, 126) { history.redo() }
+        val undo = TakoIconButton(TakoButtonIcon.UNDO, Text.literal("Undo"), panelX + 146, panelY + 4) { history.undo() }
+        val redo = TakoIconButton(TakoButtonIcon.REDO, Text.literal("Redo"), panelX + 172, panelY + 4) { history.redo() }
         undoButton = undo
         redoButton = redo
+        panelIconButtons += listOf(undo, redo)
         addDrawableChild(undo)
         addDrawableChild(redo)
 
-        HudAnchor.entries.forEachIndexed { index, anchor ->
-            val button = ButtonWidget.builder(Text.literal(anchorLabel(anchor))) {
-                setAnchor(anchor)
-            }.dimensions(width - 210 + (index % 3) * 66, 164 + (index / 3) * 22, 62, 20).build()
-            anchorButtons[anchor] = button
-            addDrawableChild(button)
-        }
+        val anchor = layoutFor(selectedComponent).anchor
+        horizontalAnchorDropdown = TakoDropdown(
+            textRenderer,
+            listOf("Left", "Center", "Right"),
+            { it },
+            anchor.ordinal % 3,
+            ::setHorizontalAnchor
+        )
+        verticalAnchorDropdown = TakoDropdown(
+            textRenderer,
+            listOf("Top", "Center", "Bottom"),
+            { it },
+            anchor.ordinal / 3,
+            ::setVerticalAnchor
+        )
 
         addDrawableChild(ButtonWidget.builder(Text.literal("Save")) {
             RvlAddonsConfigStore.save()
@@ -94,7 +106,8 @@ class HudLayoutEditorScreen(private val parent: Screen?) : Screen(Text.literal("
         undoButton?.active = history.canUndo
         redoButton?.active = history.canRedo
         val selectedAnchor = layoutFor(selectedComponent).anchor
-        anchorButtons.forEach { (anchor, button) -> button.active = anchor != selectedAnchor }
+        horizontalAnchorDropdown?.selectedIndex = selectedAnchor.ordinal % 3
+        verticalAnchorDropdown?.selectedIndex = selectedAnchor.ordinal / 3
         super.render(context, mouseX, mouseY, delta)
         context.drawCenteredTextWithShadow(textRenderer, title, width / 2, 20, 0xFFFFFF)
 
@@ -104,9 +117,12 @@ class HudLayoutEditorScreen(private val parent: Screen?) : Screen(Text.literal("
         drawComponent(context, minecraft, HudComponent.COMA)
         drawComponent(context, minecraft, HudComponent.PARTY)
         drawPropertiesPanel(context)
+        panelIconButtons.forEach { it.render(context, mouseX, mouseY, delta) }
+        renderAnchorDropdowns(context)
     }
 
     override fun mouseClicked(mouseX: Double, mouseY: Double, button: Int): Boolean {
+        if (button == 0 && handleAnchorDropdownClick(mouseX, mouseY)) return true
         if (super.mouseClicked(mouseX, mouseY, button)) return true
         if (button != 0) return false
 
@@ -119,7 +135,13 @@ class HudLayoutEditorScreen(private val parent: Screen?) : Screen(Text.literal("
             return true
         }
 
-        val hit = listOf(HudComponent.PARTY, HudComponent.COMA, HudComponent.COOLDOWN, HudComponent.TRACE, HudComponent.STATUS)
+        val hit = listOf(
+            HudComponent.PARTY,
+            HudComponent.COMA,
+            HudComponent.COOLDOWN,
+            HudComponent.TRACE,
+            HudComponent.STATUS
+        )
             .firstOrNull { contains(componentRect(it), mouseX, mouseY) }
         if (hit != null) {
             selectedComponent = hit
@@ -129,7 +151,6 @@ class HudLayoutEditorScreen(private val parent: Screen?) : Screen(Text.literal("
             dragOffsetX = mouseX.toInt() - rect.x
             dragOffsetY = mouseY.toInt() - rect.y
             dragging = true
-            layoutFor(hit).anchor = HudAnchor.TOP_LEFT
             return true
         }
         return false
@@ -215,8 +236,14 @@ class HudLayoutEditorScreen(private val parent: Screen?) : Screen(Text.literal("
         val panelX = width - 210
         val panelY = 44
         val panelWidth = 198
-        context.fill(panelX, panelY, panelX + panelWidth, panelY + 190, 0xCC101010.toInt())
-        context.drawTextWithShadow(textRenderer, Text.literal(componentName(selectedComponent)), panelX + 8, panelY + 8, 0xFFFFFF)
+        context.fill(panelX, panelY, panelX + panelWidth, panelY + 230, 0xCC101010.toInt())
+        context.drawTextWithShadow(
+            textRenderer,
+            Text.literal(componentName(selectedComponent)),
+            panelX + 8,
+            panelY + 8,
+            0xFFFFFF
+        )
         context.drawTextWithShadow(
             textRenderer,
             Text.literal("X: ${layout.offsetX}  Y: ${layout.offsetY}"),
@@ -233,13 +260,141 @@ class HudLayoutEditorScreen(private val parent: Screen?) : Screen(Text.literal("
         )
         context.drawTextWithShadow(
             textRenderer,
-            Text.literal("Anchor: ${layout.anchor.name}"),
+            Text.literal("Anchor: ${anchorLabel(layout.anchor)}"),
             panelX + 8,
             panelY + 59,
             0x999999
         )
-        context.drawTextWithShadow(textRenderer, Text.literal("- / +"), panelX + 132, panelY + 78, 0x999999)
-        context.drawTextWithShadow(textRenderer, Text.literal("Select anchor"), panelX + 8, panelY + 106, 0x999999)
+        context.drawTextWithShadow(textRenderer, Text.literal("Horizontal"), panelX + 8, panelY + 92, 0x999999)
+        context.drawTextWithShadow(textRenderer, Text.literal("Vertical"), panelX + 8, panelY + 130, 0x999999)
+        context.drawTextWithShadow(textRenderer, Text.literal("Preview"), panelX + 108, panelY + 92, 0x999999)
+        drawAnchorPreview(context, layout.anchor, panelX + 108, panelY + 104)
+    }
+
+    private fun drawAnchorPreview(context: DrawContext, anchor: HudAnchor, x: Int, y: Int) {
+        val frameWidth = 78
+        val frameHeight = 58
+        val childWidth = 26
+        val childHeight = 12
+        val column = anchor.ordinal % 3
+        val row = anchor.ordinal / 3
+        val childX = when (column) {
+            0 -> x + 8
+            1 -> x + frameWidth / 2 - childWidth / 2
+            else -> x + frameWidth - 8 - childWidth
+        }
+        val childY = when (row) {
+            0 -> y + 7
+            1 -> y + frameHeight / 2 - childHeight / 2
+            else -> y + frameHeight - 7 - childHeight
+        }
+        val childCenterX = childX + childWidth / 2
+        val childCenterY = childY + childHeight / 2
+        val horizontalPin = when (column) {
+            0 -> x + 1
+            1 -> x + frameWidth / 2
+            else -> x + frameWidth - 1
+        }
+        val childHorizontalPin = when (column) {
+            0 -> childX
+            1 -> childCenterX
+            else -> childX + childWidth
+        }
+        val verticalPin = when (row) {
+            0 -> y + 1
+            1 -> y + frameHeight / 2
+            else -> y + frameHeight - 1
+        }
+        val childVerticalPin = when (row) {
+            0 -> childY
+            1 -> childCenterY
+            else -> childY + childHeight
+        }
+        val pinColor = 0xFF55A9FF.toInt()
+        val frameColor = 0xFF596168.toInt()
+        val childColor = 0xFFB8C0C6.toInt()
+
+        context.fill(x, y, x + frameWidth, y + frameHeight, 0xFF202428.toInt())
+        context.fill(x, y, x + frameWidth, y + 1, frameColor)
+        context.fill(x, y + frameHeight - 1, x + frameWidth, y + frameHeight, frameColor)
+        context.fill(x, y, x + 1, y + frameHeight, frameColor)
+        context.fill(x + frameWidth - 1, y, x + frameWidth, y + frameHeight, frameColor)
+        context.fill(
+            minOf(horizontalPin, childHorizontalPin),
+            childCenterY,
+            max(horizontalPin, childHorizontalPin) + 1,
+            childCenterY + 1,
+            pinColor
+        )
+        context.fill(
+            childCenterX,
+            minOf(verticalPin, childVerticalPin),
+            childCenterX + 1,
+            max(verticalPin, childVerticalPin) + 1,
+            pinColor
+        )
+        context.fill(childX, childY, childX + childWidth, childY + childHeight, 0xFF121619.toInt())
+        context.fill(childX, childY, childX + childWidth, childY + 1, childColor)
+        context.fill(childX, childY + childHeight - 1, childX + childWidth, childY + childHeight, childColor)
+        context.fill(childX, childY, childX + 1, childY + childHeight, childColor)
+        context.fill(childX + childWidth - 1, childY, childX + childWidth, childY + childHeight, childColor)
+        drawAnchorPin(context, horizontalPin, childCenterY, pinColor)
+        drawAnchorPin(context, childHorizontalPin, childCenterY, pinColor)
+        drawAnchorPin(context, childCenterX, verticalPin, pinColor)
+        drawAnchorPin(context, childCenterX, childVerticalPin, pinColor)
+    }
+
+    private fun drawAnchorPin(context: DrawContext, x: Int, y: Int, color: Int) {
+        context.fill(x - 2, y - 2, x + 3, y + 3, color)
+    }
+
+    private fun renderAnchorDropdowns(context: DrawContext) {
+        val horizontal = horizontalAnchorDropdown ?: return
+        val vertical = verticalAnchorDropdown ?: return
+        val panelX = width - 210
+        val panelY = 44
+        val x = panelX + 8
+        horizontal.render(context, x, panelY + 104, 90)
+        vertical.render(context, x, panelY + 142, 90)
+    }
+
+    private fun handleAnchorDropdownClick(mouseX: Double, mouseY: Double): Boolean {
+        val horizontal = horizontalAnchorDropdown ?: return false
+        val vertical = verticalAnchorDropdown ?: return false
+        val panelX = width - 210
+        val panelY = 44
+        val x = panelX + 8
+        val dropdownWidth = 90
+        val height = 20
+        val horizontalY = panelY + 104
+        val verticalY = panelY + 142
+
+        fun clickExpanded(dropdown: TakoDropdown<String>, y: Int): Boolean {
+            if (!dropdown.expanded) return false
+            val inDropdown = mouseX >= x && mouseX < x + dropdownWidth
+            val inControl = mouseY >= y && mouseY < y + height
+            val inOptions = mouseY >= y + height && mouseY < y + height * (dropdown.items.size + 1)
+            if (inDropdown && inControl) {
+                dropdown.expanded = false
+                return true
+            }
+            if (inDropdown && inOptions) {
+                return dropdown.mouseClicked(mouseX, mouseY, x, y, dropdownWidth, height)
+            }
+            dropdown.expanded = false
+            return false
+        }
+
+        if (clickExpanded(horizontal, horizontalY) || clickExpanded(vertical, verticalY)) return true
+        if (horizontal.mouseClicked(mouseX, mouseY, x, horizontalY, dropdownWidth, height)) {
+            vertical.expanded = false
+            return true
+        }
+        if (vertical.mouseClicked(mouseX, mouseY, x, verticalY, dropdownWidth, height)) {
+            horizontal.expanded = false
+            return true
+        }
+        return false
     }
 
     private fun componentRect(component: HudComponent): HudRect {
@@ -356,17 +511,42 @@ class HudLayoutEditorScreen(private val parent: Screen?) : Screen(Text.literal("
         }
     }
 
-    private fun anchorLabel(anchor: HudAnchor): String = when (anchor) {
-        HudAnchor.TOP_LEFT -> "TL"
-        HudAnchor.TOP_CENTER -> "TC"
-        HudAnchor.TOP_RIGHT -> "TR"
-        HudAnchor.CENTER_LEFT -> "CL"
-        HudAnchor.CENTER -> "C"
-        HudAnchor.CENTER_RIGHT -> "CR"
-        HudAnchor.BOTTOM_LEFT -> "BL"
-        HudAnchor.BOTTOM_CENTER -> "BC"
-        HudAnchor.BOTTOM_RIGHT -> "BR"
+    private fun setHorizontalAnchor(alignment: String) {
+        val current = layoutFor(selectedComponent).anchor
+        val row = current.ordinal / 3
+        val column = when (alignment) {
+            "Left" -> 0
+            "Center" -> 1
+            else -> 2
+        }
+        setAnchor(HudAnchor.entries[row * 3 + column])
     }
+
+    private fun setVerticalAnchor(alignment: String) {
+        val current = layoutFor(selectedComponent).anchor
+        val row = when (alignment) {
+            "Top" -> 0
+            "Center" -> 1
+            else -> 2
+        }
+        val column = current.ordinal % 3
+        setAnchor(HudAnchor.entries[row * 3 + column])
+    }
+
+    private fun horizontalAnchorLabel(anchor: HudAnchor): String = when (anchor.ordinal % 3) {
+        0 -> "Left"
+        1 -> "Center"
+        else -> "Right"
+    }
+
+    private fun verticalAnchorLabel(anchor: HudAnchor): String = when (anchor.ordinal / 3) {
+        0 -> "Top"
+        1 -> "Center"
+        else -> "Bottom"
+    }
+
+    private fun anchorLabel(anchor: HudAnchor): String =
+        "${verticalAnchorLabel(anchor)} ${horizontalAnchorLabel(anchor)}"
 
     private fun reset(component: HudComponent) {
         editLayouts(listOf(component)) { layout ->
@@ -427,10 +607,11 @@ class HudLayoutEditorScreen(private val parent: Screen?) : Screen(Text.literal("
     ) {
         if (before == after) return
         applyLayouts(before)
-        history.execute(TakoEditCommand(
-            redoAction = { applyLayouts(after) },
-            undoAction = { applyLayouts(before) }
-        ))
+        history.execute(
+            TakoEditCommand(
+                redoAction = { applyLayouts(after) },
+                undoAction = { applyLayouts(before) }
+            ))
     }
 
     private fun applyLayouts(snapshot: Map<HudComponent, HudLayout>) {
