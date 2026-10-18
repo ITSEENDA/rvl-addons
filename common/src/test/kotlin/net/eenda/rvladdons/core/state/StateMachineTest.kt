@@ -32,7 +32,7 @@ class StateMachineTest {
         val machine = StateMachine()
 
         machine.setState(first)
-        machine.addTransitionFrom(first, second, PredicateFunc.True)
+        machine.addTransitionFrom(first, second) { true }
         machine.update()
 
         assertEquals(
@@ -43,32 +43,24 @@ class StateMachineTest {
     }
 
     @Test
-    fun globalTransitionHasPriorityAndFixedUpdateUsesCurrentState() {
+    fun globalTransitionHasPriority() {
         val events = mutableListOf<String>()
         val first = object : BaseState() {
-            override fun onFixedUpdate() {
-                events += "first-fixed"
-            }
         }
         val second = object : BaseState() {
             override fun onEnter() {
                 events += "second-enter"
-            }
-
-            override fun onFixedUpdate() {
-                events += "second-fixed"
             }
         }
         val localTarget = object : BaseState() {}
         val machine = StateMachine()
 
         machine.setState(first)
-        machine.addTransitionFrom(first, localTarget, PredicateFunc.True)
-        machine.addTransition(second, PredicateFunc.True)
+        machine.addTransitionFrom(first, localTarget) { true }
+        machine.addTransition(second) { true }
         machine.update()
-        machine.fixedUpdate()
 
-        assertEquals(listOf("second-enter", "second-fixed"), events)
+        assertEquals(listOf("second-enter"), events)
         assertEquals(second, machine.currentState)
     }
 
@@ -80,7 +72,7 @@ class StateMachineTest {
         val machine = StateMachine()
 
         machine.setState(first)
-        machine.addTransitionFrom(first, second, PredicateFunc { ready })
+        machine.addTransitionFrom(first, second) { ready }
         machine.update()
         assertEquals(first, machine.currentState)
 

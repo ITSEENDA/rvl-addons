@@ -1,0 +1,10 @@
+{
+  "auto_revive_rbd": {
+    "sounds": [
+      {
+        "name": "rvl-addons:auto_revive_rbd",
+        "stream": true
+      }
+    ]
+  }
+}

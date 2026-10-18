@@ -1,0 +1,348 @@
+package net.eenda.rvladdons.feature.cooldown
+
+import net.eenda.rvladdons.client.storage.JsonFileStore
+import net.eenda.rvladdons.core.AccountStorage
+import net.eenda.rvladdons.core.RvlTextMatcher
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.StandardCopyOption
+import java.util.UUID
+import java.util.Properties
+import java.util.Locale
+
+object SkillProfileStore {
+    private const val LEGACY_PROFILE_FILE = "rvl-addons-skill-profiles.properties"
+    private const val LEGACY_PROFILE_DIRECTORY = "rvl-addons-skill-profiles"
+
+    private val profiles = LinkedHashMap<String, SkillProfile>()
+    private var path: Path? = null
+
+    @Synchronized
+    fun load(profilePath: Path, legacyAccountPath: Path? = null, legacyPath: Path? = null) {
+        path = profilePath
+        profiles.clear()
+        val jsonProfiles = JsonFileStore.read(profilePath, Array<SkillProfile>::class.java)
+        val legacySource = if (jsonProfiles == null) {
+            listOfNotNull(legacyAccountPath, legacyPath).firstOrNull(Files::exists)
+        } else {
+            null
+        }
+        if (jsonProfiles != null) {
+            jsonProfiles.filterNotNull().filter { it.skillKey.isNotBlank() }
+                .forEach { profiles[it.skillKey] = it }
+        } else if (legacySource != null) {
+            readLegacyProfiles(legacySource)
+        }
+
+        if (deduplicateInternal() || legacySource != null) save()
+        legacySource?.let(::archive)
+    }
+
+    private fun readLegacyProfiles(path: Path) {
+        val properties = Properties()
+        Files.newInputStream(path).use(properties::load)
+        val count = properties.getProperty("profile.count")?.toIntOrNull()?.coerceIn(0, 10_000) ?: 0
+        repeat(count) { index ->
+            val key = properties.getProperty("profile.$index.key") ?: return@repeat
+            profiles[key] = SkillProfile(
+                skillKey = key,
+                label = properties.getProperty("profile.$index.label") ?: key,
+                setId = properties.getProperty("profile.$index.setId")?.ifBlank { null },
+                trigger = properties.getProperty("profile.$index.trigger")
+                    ?.let { runCatching { SkillTrigger.valueOf(it) }.getOrNull() }
+                    ?: SkillTrigger.UNKNOWN,
+                sourceFingerprint = properties.getProperty("profile.$index.fingerprint").orEmpty(),
+                sourceType = properties.getProperty("profile.$index.sourceType")
+                    ?.let { runCatching { SkillSourceType.valueOf(it) }.getOrNull() }
+                    ?: SkillSourceType.ITEM,
+                skillType = properties.getProperty("profile.$index.skillType")
+                    ?.let { runCatching { SkillType.valueOf(it) }.getOrNull() }
+                    ?: SkillType.UNKNOWN,
+                setBonusLevel = properties.getProperty("profile.$index.setBonusLevel")?.toIntOrNull(),
+                enabled = properties.getProperty("profile.$index.enabled")?.toBooleanStrictOrNull() ?: true,
+                cooldownHintMs = properties.getProperty("profile.$index.cooldownMs")?.toLongOrNull()
+            )
+        }
+    }
+
+    fun accountProfilePath(dataDir: Path, uuid: UUID?, username: String): Path =
+        AccountStorage.directory(dataDir, uuid, username).resolve("skill-profiles.json")
+
+    fun legacyAccountProfilePath(configDir: Path, uuid: UUID?, username: String): Path =
+        AccountStorage.path(configDir, LEGACY_PROFILE_DIRECTORY, uuid, username)
+
+    fun accountId(uuid: UUID?, username: String): String = AccountStorage.accountId(uuid, username)
+
+    fun legacyProfilePath(configDir: Path): Path = configDir.resolve(LEGACY_PROFILE_FILE)
+
+    private fun archive(path: Path) {
+        if (Files.exists(path)) {
+            Files.move(path, path.resolveSibling("${path.fileName}.legacy"), StandardCopyOption.REPLACE_EXISTING)
+        }
+    }
+
+    @Synchronized
+    fun register(descriptor: SkillDescriptor, sourceType: SkillSourceType = SkillSourceType.ITEM): SkillProfile = register(
+        skillKey = descriptor.skillKey,
+        label = descriptor.displayName,
+        setId = descriptor.setId,
+        trigger = descriptor.trigger,
+        sourceFingerprint = descriptor.sourceFingerprint,
+        cooldownHintMs = descriptor.cooldownHintMs,
+        sourceType = sourceType,
+        skillType = descriptor.skillType,
+        setBonusLevel = descriptor.setBonusLevel
+    )
+
+    @Synchronized
+    fun register(
+        skillKey: String,
+        label: String,
+        setId: String?,
+        trigger: SkillTrigger,
+        sourceFingerprint: String,
+        cooldownHintMs: Long? = null,
+        sourceType: SkillSourceType = SkillSourceType.ITEM,
+        skillType: SkillType = SkillType.UNKNOWN,
+        setBonusLevel: Int? = null
+    ): SkillProfile {
+        val existing = profiles[skillKey]
+        if (existing != null) {
+            val changed = merge(existing, label, cooldownHintMs, sourceType, skillType, setBonusLevel)
+            if (changed) save()
+            return existing
+        }
+
+        // A changed item fingerprint must not create another visible profile for the same skill.
+        val duplicate = profiles.values.firstOrNull {
+            profileIdentity(it) == profileIdentity(
+                label,
+                setId,
+                trigger,
+                sourceFingerprint,
+                sourceType,
+                skillType,
+                setBonusLevel
+            )
+        }
+        if (duplicate != null) {
+            val changed = merge(duplicate, label, cooldownHintMs, sourceType, skillType, setBonusLevel)
+            if (changed) save()
+            return duplicate
+        }
+
+        return SkillProfile(
+            skillKey = skillKey,
+            label = label,
+            setId = setId,
+            trigger = trigger,
+            sourceFingerprint = sourceFingerprint,
+            sourceType = sourceType,
+            cooldownHintMs = cooldownHintMs,
+            skillType = skillType,
+            setBonusLevel = setBonusLevel
+        ).also {
+            profiles[skillKey] = it
+            save()
+        }
+    }
+
+    @Synchronized
+    fun all(): List<SkillProfile> = profiles.values.toList()
+
+    @Synchronized
+    fun find(skillKey: String): SkillProfile? = profiles[skillKey]
+
+    @Synchronized
+    fun setLabel(skillKey: String, label: String) {
+        profiles[skillKey]?.label = label.trim().ifBlank { profiles[skillKey]?.label ?: skillKey }
+    }
+
+    @Synchronized
+    fun setEnabled(skillKey: String, enabled: Boolean) {
+        profiles[skillKey]?.enabled = enabled
+    }
+
+    @Synchronized
+    fun remove(skillKey: String): Boolean = profiles.remove(skillKey) != null
+
+    @Synchronized
+    fun removeAndSave(skillKey: String): Boolean {
+        val removed = remove(skillKey)
+        if (removed) save()
+        return removed
+    }
+
+    @Synchronized
+    fun removeSetProfilesExcept(setId: String, keepKeys: Set<String>) {
+        val changed = profiles.entries.removeIf { (key, profile) ->
+            profile.setId == setId && profile.sourceType != SkillSourceType.ITEM && key !in keepKeys
+        }
+        if (changed) save()
+    }
+
+    @Synchronized
+    fun removeLegacyItemProfiles(fingerprints: Set<String>) {
+        if (fingerprints.isEmpty()) return
+        val changed = profiles.entries.removeIf { (key, profile) ->
+            profile.sourceType == SkillSourceType.ITEM && profile.sourceFingerprint in fingerprints
+        }
+        if (changed) save()
+    }
+
+    /** Removes armor ITEM profiles created before armor was represented by a set profile. */
+    @Synchronized
+    fun removeLegacyArmorItemProfiles(itemNames: Set<String>) {
+        val normalizedNames = itemNames.map(::normalize).filter(String::isNotBlank).toSet()
+        if (normalizedNames.isEmpty()) return
+        val changed = profiles.entries.removeIf { (_, profile) ->
+            profile.sourceType == SkillSourceType.ITEM && normalizedNames.any { name ->
+                val label = normalize(profile.label)
+                label == name || label.startsWith("$name ")
+            }
+        }
+        if (changed) save()
+    }
+
+    /** Removes stale equipped-set profiles when the same set is now recognized as a configured coma set. */
+    @Synchronized
+    fun removeLegacyEquippedSetProfiles(setIds: Set<String>) {
+        val normalizedIds = setIds.map(::normalize).filter(String::isNotBlank).toSet()
+        if (normalizedIds.isEmpty()) return
+        val changed = profiles.entries.removeIf { (_, profile) ->
+            profile.sourceType == SkillSourceType.EQUIPPED_SET &&
+                normalize(profile.setId.orEmpty()) in normalizedIds
+        }
+        if (changed) save()
+    }
+
+    @Synchronized
+    fun deduplicate() {
+        if (deduplicateInternal()) save()
+    }
+
+    @Synchronized
+    fun save() {
+        val profilePath = path ?: return
+        JsonFileStore.write(profilePath, profiles.values.toList())
+    }
+
+    private fun SkillSourceType.rank(): Int = when (this) {
+        SkillSourceType.ITEM -> 1
+        SkillSourceType.MAIN_HAND_WEAPON, SkillSourceType.OFF_HAND_WEAPON -> 2
+        SkillSourceType.EQUIPPED_SET -> 3
+        SkillSourceType.COMA_SET -> 4
+        SkillSourceType.UNKNOWN -> 0
+    }
+
+    private fun merge(
+        profile: SkillProfile,
+        label: String?,
+        cooldownHintMs: Long?,
+        sourceType: SkillSourceType,
+        skillType: SkillType,
+        setBonusLevel: Int?
+    ): Boolean {
+        var changed = false
+        val cleanedLabel = label?.let(SkillTextParser::cleanLegacyProfileLabel)
+        if (profile.cooldownHintMs == null && cooldownHintMs != null) {
+            profile.cooldownHintMs = cooldownHintMs
+            changed = true
+        }
+        if (sourceType.rank() > profile.sourceType.rank()) {
+            profile.sourceType = sourceType
+            if (!cleanedLabel.isNullOrBlank()) profile.label = cleanedLabel
+            changed = true
+        }
+        if (profile.skillType == SkillType.UNKNOWN && skillType != SkillType.UNKNOWN) {
+            profile.skillType = skillType
+            changed = true
+        }
+        if (profile.setBonusLevel == null && setBonusLevel != null) {
+            profile.setBonusLevel = setBonusLevel
+            changed = true
+        }
+        return changed
+    }
+
+    private fun deduplicateInternal(): Boolean {
+        val survivors = LinkedHashMap<String, SkillProfile>()
+        var changed = false
+        profiles.values.toList().forEach { profile ->
+            val cleanedLabel = SkillTextParser.cleanLegacyProfileLabel(profile.label)
+            if (cleanedLabel != profile.label) {
+                profile.label = cleanedLabel
+                changed = true
+            }
+            val identity = profileIdentity(profile)
+            val survivor = survivors[identity]
+            if (survivor == null) {
+                survivors[identity] = profile
+                return@forEach
+            }
+            merge(
+                survivor,
+                profile.label,
+                profile.cooldownHintMs,
+                profile.sourceType,
+                profile.skillType,
+                profile.setBonusLevel
+            )
+            changed = true
+        }
+        if (changed) {
+            profiles.clear()
+            profiles.putAll(survivors)
+        }
+        return changed
+    }
+
+    private fun profileIdentity(profile: SkillProfile): String = profileIdentity(
+        profile.label,
+        profile.setId,
+        profile.trigger,
+        profile.sourceFingerprint,
+        profile.sourceType,
+        profile.skillType,
+        profile.setBonusLevel
+    )
+
+    private fun profileIdentity(
+        label: String,
+        setId: String?,
+        trigger: SkillTrigger,
+        sourceFingerprint: String,
+        sourceType: SkillSourceType,
+        skillType: SkillType,
+        setBonusLevel: Int?
+    ): String {
+        val isSet = sourceType == SkillSourceType.COMA_SET ||
+            sourceType == SkillSourceType.EQUIPPED_SET ||
+            sourceFingerprint.startsWith("set:")
+        val owner = if (isSet) normalizeSetOwner(label.ifBlank { setId ?: sourceFingerprint })
+        else normalizeItemOwner(label)
+        return listOf(
+            if (isSet) "SET" else "ITEM",
+            owner,
+            trigger.name,
+            skillType.name,
+            setBonusLevel?.toString().orEmpty()
+        ).joinToString("|")
+    }
+
+    private fun normalize(value: String): String = value
+        .lowercase(Locale.ROOT)
+        .replace(Regex("\\s+"), " ")
+        .trim()
+
+    private fun normalizeItemOwner(value: String): String = normalize(
+        SkillTextParser.cleanLegacyProfileLabel(value).substringBefore(" - ")
+    )
+
+    private fun normalizeSetOwner(value: String): String = RvlTextMatcher.normalize(value)
+        .replace(Regex("^CO MA\\s+"), "")
+        .replace(Regex("[^A-Z0-9 ]"), " ")
+        .split(Regex("\\s+"))
+        .filter { it.isNotBlank() && it !in setOf("EX", "OVERLOAD") }
+        .joinToString(" ")
+}

@@ -5,7 +5,5 @@ abstract class BaseState : IState {
 
     override fun onUpdate() = Unit
 
-    override fun onFixedUpdate() = Unit
-
     override fun onExit() = Unit
 }

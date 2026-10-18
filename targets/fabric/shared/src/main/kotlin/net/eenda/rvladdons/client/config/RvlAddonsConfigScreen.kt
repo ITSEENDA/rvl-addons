@@ -1,0 +1,305 @@
+package net.eenda.rvladdons.client.config
+
+import net.eenda.rvladdons.client.coma.ComaSetManagerScreen
+import net.eenda.rvladdons.client.cooldown.CooldownProfileScreen
+import net.eenda.rvladdons.client.hud.HudLayoutEditorScreen
+import dev.isxander.yacl3.api.ButtonOption
+import dev.isxander.yacl3.api.ConfigCategory
+import dev.isxander.yacl3.api.OptionGroup
+import dev.isxander.yacl3.api.Option
+import dev.isxander.yacl3.api.OptionDescription
+import dev.isxander.yacl3.api.YetAnotherConfigLib
+import dev.isxander.yacl3.api.controller.BooleanControllerBuilder
+import dev.isxander.yacl3.api.controller.EnumControllerBuilder
+import dev.isxander.yacl3.api.controller.FloatSliderControllerBuilder
+import dev.isxander.yacl3.api.controller.IntegerFieldControllerBuilder
+import net.eenda.rvladdons.core.ModEnabledState
+import net.eenda.rvladdons.core.RvlAddonsConfigStore
+import net.eenda.rvladdons.feature.revive.AutoReviveMode
+import net.eenda.rvladdons.feature.party.PartyJoinExecutionMode
+import net.eenda.rvladdons.feature.party.PartyAutoRunMode
+import net.minecraft.client.MinecraftClient
+import net.minecraft.client.gui.screen.Screen
+import net.minecraft.text.Text
+
+object RvlAddonsConfigScreen {
+    fun create(parent: Screen?): Screen {
+        val config = RvlAddonsConfigStore.config
+        val general = ConfigCategory.createBuilder()
+            .name(Text.literal("General"))
+            .option(
+                Option.createBuilder<Boolean>()
+                    .name(Text.literal("Enable RVL Addons"))
+                    .description(OptionDescription.of(Text.literal("Enable mod features when an RVL server is detected.")))
+                    .binding(config.enabled, { config.enabled }, { config.enabled = it })
+                    .controller { BooleanControllerBuilder.create(it).coloured(true).onOffFormatter() }
+                    .build()
+            )
+            .build()
+
+        val hud = ConfigCategory.createBuilder()
+            .name(Text.literal("HUD"))
+            .option(
+                ButtonOption.createBuilder()
+                    .name(Text.literal("Edit HUD layout"))
+                    .text(Text.literal("Open"))
+                    .description(OptionDescription.of(Text.literal("Arrange all RVL Addons HUD components in one editor.")))
+                    .action { screen ->
+                        MinecraftClient.getInstance().setScreen(HudLayoutEditorScreen(screen))
+                    }
+                    .build()
+            )
+            .option(
+                Option.createBuilder<Boolean>()
+                    .name(Text.literal("Show RVL status"))
+                    .binding(config.hudStatusVisible, { config.hudStatusVisible }, { config.hudStatusVisible = it })
+                    .controller { BooleanControllerBuilder.create(it).coloured(true).onOffFormatter() }
+                    .build()
+            )
+            .option(
+                Option.createBuilder<Boolean>()
+                    .name(Text.literal("Show trace status"))
+                    .binding(config.hudTraceVisible, { config.hudTraceVisible }, { config.hudTraceVisible = it })
+                    .controller { BooleanControllerBuilder.create(it).coloured(true).onOffFormatter() }
+                    .build()
+            )
+            .option(
+                Option.createBuilder<Boolean>()
+                    .name(Text.literal("Show cooldowns"))
+                    .description(OptionDescription.of(Text.literal("Show all active server-correlated cooldowns.")))
+                    .binding(config.hudCooldownVisible, { config.hudCooldownVisible }, { config.hudCooldownVisible = it })
+                    .controller { BooleanControllerBuilder.create(it).coloured(true).onOffFormatter() }
+                    .build()
+            )
+            .option(
+                Option.createBuilder<Boolean>()
+                    .name(Text.literal("Show COMA set"))
+                    .binding(config.hudComaVisible, { config.hudComaVisible }, { config.hudComaVisible = it })
+                    .controller { BooleanControllerBuilder.create(it).coloured(true).onOffFormatter() }
+                    .build()
+            )
+            .option(
+                Option.createBuilder<Boolean>()
+                    .name(Text.literal("Show Party status"))
+                    .description(OptionDescription.of(Text.literal("Show local party connection and readiness status.")))
+                    .binding(config.hudPartyVisible, { config.hudPartyVisible }, { config.hudPartyVisible = it })
+                    .controller { BooleanControllerBuilder.create(it).coloured(true).onOffFormatter() }
+                    .build()
+            )
+            .build()
+
+        val comaGroup = OptionGroup.createBuilder()
+            .name(Text.literal("COMA"))
+            .description(OptionDescription.of(Text.literal("COMA set capture, swapping and timing settings.")))
+            .option(
+                Option.createBuilder<Int>()
+                    .name(Text.literal("Local open delay (ms)"))
+                    .description(OptionDescription.of(Text.literal("Delay after the COMA menu is detected before local swap actions.")))
+                    .binding(config.comaTiming.openMs, { config.comaTiming.openMs }, { config.comaTiming.openMs = it.coerceIn(0, 5000) })
+                    .controller { IntegerFieldControllerBuilder.create(it).range(0, 5000) }
+                    .build()
+            )
+            .option(
+                Option.createBuilder<Int>()
+                    .name(Text.literal("Local clear interval (ms)"))
+                    .description(OptionDescription.of(Text.literal("Delay between local clear clicks. 0 sends the clear burst immediately.")))
+                    .binding(config.comaTiming.clearIntervalMs, { config.comaTiming.clearIntervalMs }, { config.comaTiming.clearIntervalMs = it.coerceIn(0, 5000) })
+                    .controller { IntegerFieldControllerBuilder.create(it).range(0, 5000) }
+                    .build()
+            )
+            .option(
+                Option.createBuilder<Int>()
+                    .name(Text.literal("Local clear to move delay (ms)"))
+                    .description(OptionDescription.of(Text.literal("Delay between the local clear burst and move burst.")))
+                    .binding(config.comaTiming.clearToMoveMs, { config.comaTiming.clearToMoveMs }, { config.comaTiming.clearToMoveMs = it.coerceIn(0, 5000) })
+                    .controller { IntegerFieldControllerBuilder.create(it).range(0, 5000) }
+                    .build()
+            )
+            .option(
+                Option.createBuilder<Int>()
+                    .name(Text.literal("Local move interval (ms)"))
+                    .description(OptionDescription.of(Text.literal("Delay between local move clicks. 0 sends the move burst immediately.")))
+                    .binding(config.comaTiming.moveIntervalMs, { config.comaTiming.moveIntervalMs }, { config.comaTiming.moveIntervalMs = it.coerceIn(0, 5000) })
+                    .controller { IntegerFieldControllerBuilder.create(it).range(0, 5000) }
+                    .build()
+            )
+            .option(
+                Option.createBuilder<Int>()
+                    .name(Text.literal("Local close delay (ms)"))
+                    .description(OptionDescription.of(Text.literal("Delay after the local move burst before closing the menu.")))
+                    .binding(config.comaTiming.closeMs, { config.comaTiming.closeMs }, { config.comaTiming.closeMs = it.coerceIn(0, 5000) })
+                    .controller { IntegerFieldControllerBuilder.create(it).range(0, 5000) }
+                    .build()
+            )
+            .option(
+                Option.createBuilder<Boolean>()
+                    .name(Text.literal("Sync with server"))
+                    .description(OptionDescription.of(Text.literal("Wait for server container updates and verify every COMA swap. Disable for local burst swapping.")))
+                    .binding(config.comaSwapServerSync, { config.comaSwapServerSync }, { config.comaSwapServerSync = it })
+                    .controller { BooleanControllerBuilder.create(it).coloured(true).onOffFormatter() }
+                    .build()
+            )
+            .option(
+                ButtonOption.createBuilder()
+                    .name(Text.literal("Manage COMA sets"))
+                    .text(Text.literal("Open"))
+                    .description(OptionDescription.of(Text.literal("View captured items, inventory status and set actions.")))
+                    .action { screen ->
+                        MinecraftClient.getInstance().setScreen(ComaSetManagerScreen(screen))
+                    }
+                    .build()
+            )
+            .build()
+
+        val featuresCategory = ConfigCategory.createBuilder()
+            .name(Text.literal("Features"))
+            .group(comaGroup)
+            .group(
+                OptionGroup.createBuilder()
+                    .name(Text.literal("Party"))
+                    .description(OptionDescription.of(Text.literal("Control how the coordinator synchronizes /dchien execution.")))
+                    .option(
+                        Option.createBuilder<PartyJoinExecutionMode>()
+                            .name(Text.literal("Join execution mode"))
+                            .description(OptionDescription.of(Text.literal("Manual mirrors coordinator actions; Automatic lets each client run the join executor.")))
+                            .binding(config.partyJoinExecutionMode, { config.partyJoinExecutionMode }, { config.partyJoinExecutionMode = it })
+                            .controller { EnumControllerBuilder.create(it).enumClass(PartyJoinExecutionMode::class.java) }
+                            .build()
+                    )
+                    .option(
+                        Option.createBuilder<Boolean>()
+                            .name(Text.literal("Party debug toasts"))
+                            .description(OptionDescription.of(Text.literal("Show connection, sync and join phase notifications.")))
+                            .binding(config.partyDebugToasts, { config.partyDebugToasts }, { config.partyDebugToasts = it })
+                            .controller { BooleanControllerBuilder.create(it).coloured(true).onOffFormatter() }
+                            .build()
+                    )
+                    .option(
+                        Option.createBuilder<PartyAutoRunMode>()
+                            .name(Text.literal("Automatic run"))
+                            .description(OptionDescription.of(Text.literal("Once stops after one room. Loop starts the same command again when the room ends; Automatic mode only.")))
+                            .binding(config.partyAutoRunMode, { config.partyAutoRunMode }, { config.partyAutoRunMode = it })
+                            .controller { EnumControllerBuilder.create(it).enumClass(PartyAutoRunMode::class.java) }
+                            .build()
+                    )
+                    .option(
+                        Option.createBuilder<Int>()
+                            .name(Text.literal("Dchien loop delay (s)"))
+                            .description(OptionDescription.of(Text.literal("Wait before the next Dchien run. Minimum 3 seconds.")))
+                            .binding(
+                                config.partyDchienLoopDelaySeconds,
+                                { config.partyDchienLoopDelaySeconds },
+                                { config.partyDchienLoopDelaySeconds = it.coerceAtLeast(3) }
+                            )
+                            .controller { IntegerFieldControllerBuilder.create(it).range(3, Int.MAX_VALUE) }
+                            .build()
+                    )
+                    .option(
+                        Option.createBuilder<Int>()
+                            .name(Text.literal("TL loop delay (s)"))
+                            .description(OptionDescription.of(Text.literal("Wait before the next TL run. Minimum 10 seconds.")))
+                            .binding(
+                                config.partyTlLoopDelaySeconds,
+                                { config.partyTlLoopDelaySeconds },
+                                { config.partyTlLoopDelaySeconds = it.coerceAtLeast(10) }
+                            )
+                            .controller { IntegerFieldControllerBuilder.create(it).range(10, Int.MAX_VALUE) }
+                            .build()
+                    )
+                    .option(
+                        Option.createBuilder<Int>()
+                            .name(Text.literal("Menu settle delay (ms)"))
+                            .description(OptionDescription.of(Text.literal("Delay after a menu refresh before replaying type or room actions.")))
+                            .binding(
+                                config.partyMenuSettleDelayMs,
+                                { config.partyMenuSettleDelayMs },
+                                { config.partyMenuSettleDelayMs = it.coerceIn(0, 5000) }
+                            )
+                            .controller { IntegerFieldControllerBuilder.create(it).range(0, 5000) }
+                            .build()
+                    )
+                    .build()
+            )
+            .group(
+                OptionGroup.createBuilder()
+                    .name(Text.literal("Cooldown"))
+                    .description(OptionDescription.of(Text.literal("Manage discovered skill labels and tracking overrides.")))
+                    .option(
+                        ButtonOption.createBuilder()
+                            .name(Text.literal("Manage skill profiles"))
+                            .text(Text.literal("Open"))
+                            .action { screen ->
+                                MinecraftClient.getInstance().setScreen(CooldownProfileScreen(screen))
+                            }
+                            .build()
+                    )
+                    .build()
+            )
+            .group(
+                OptionGroup.createBuilder()
+                    .name(Text.literal("Auto revive"))
+                    .description(OptionDescription.of(Text.literal("Automatically respawn after death; RBD also runs /back and plays a sound after teleport.")))
+                    .option(
+                        Option.createBuilder<Boolean>()
+                            .name(Text.literal("Fast revive"))
+                            .description(OptionDescription.of(Text.literal("Automatically respawn after death. It pauses itself after repeated rapid deaths.")))
+                            .binding(config.autoRevive.enabled, { config.autoRevive.enabled }, { config.autoRevive.enabled = it })
+                            .controller { BooleanControllerBuilder.create(it).coloured(true).onOffFormatter() }
+                            .build()
+                    )
+                    .option(
+                        Option.createBuilder<Boolean>()
+                            .name(Text.literal("Enable RBD"))
+                            .description(OptionDescription.of(Text.literal("If you know, you know")))
+                            .binding(config.autoRevive.soundEnabled, { config.autoRevive.soundEnabled }, { config.autoRevive.soundEnabled = it })
+                            .controller { BooleanControllerBuilder.create(it).coloured(true).onOffFormatter() }
+                            .build()
+                    )
+                    .option(
+                        Option.createBuilder<Float>()
+                            .name(Text.literal("Auto revive sound volume"))
+                            .binding(config.autoRevive.soundVolume, { config.autoRevive.soundVolume }, { config.autoRevive.soundVolume = it.coerceIn(0f, 1f) })
+                            .controller { FloatSliderControllerBuilder.create(it).range(0f, 1f).step(0.01f) }
+                            .build()
+                    )
+                    .option(
+                        Option.createBuilder<Int>()
+                            .name(Text.literal("Respawn delay (ms)"))
+                            .description(OptionDescription.of(Text.literal("Delay before sending the respawn action. 0 disables the delay.")))
+                            .binding(config.autoRevive.respawnDelayMs, { config.autoRevive.respawnDelayMs }, { config.autoRevive.respawnDelayMs = it.coerceIn(0, 5000) })
+                            .controller { IntegerFieldControllerBuilder.create(it).range(0, 5000) }
+                            .build()
+                    )
+                    .option(
+                        Option.createBuilder<Int>()
+                            .name(Text.literal("Respawn to /back delay (ms)"))
+                            .description(OptionDescription.of(Text.literal("Delay after respawn before sending /back. 0 disables the delay.")))
+                            .binding(config.autoRevive.backDelayMs, { config.autoRevive.backDelayMs }, { config.autoRevive.backDelayMs = it.coerceIn(0, 5000) })
+                            .controller { IntegerFieldControllerBuilder.create(it).range(0, 5000) }
+                            .build()
+                    )
+                    .option(
+                        Option.createBuilder<AutoReviveMode>()
+                            .name(Text.literal("Mode"))
+                            .binding(config.autoRevive.mode, { config.autoRevive.mode }, { config.autoRevive.mode = it })
+                            .controller { EnumControllerBuilder.create(it).enumClass(AutoReviveMode::class.java) }
+                            .build()
+                    )
+                    .build()
+            )
+            .build()
+
+        return YetAnotherConfigLib.createBuilder()
+            .title(Text.literal("RVL Addons"))
+            .category(general)
+            .category(hud)
+            .category(featuresCategory)
+            .save {
+                RvlAddonsConfigStore.save()
+                ModEnabledState.set(config.enabled)
+            }
+            .build()
+            .generateScreen(parent)
+    }
+}
+

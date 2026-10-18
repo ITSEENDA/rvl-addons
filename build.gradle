@@ -1,37 +1,46 @@
 plugins {
-	id 'fabric-loom' apply false
-	id 'org.jetbrains.kotlin.jvm' apply false
+    id 'fabric-loom' apply false
+    id 'org.jetbrains.kotlin.jvm' version '2.4.20'
 }
 
 // Loader-specific build logic lives in the target projects.
 
 def targetProjects = [
-	'1.20.4': ':targets:fabric:1_20_4',
-	'fabric_1_20_4': ':targets:fabric:1_20_4',
-	'1.21.1': ':targets:fabric:1_21_1',
-	'fabric_1_21_1': ':targets:fabric:1_21_1'
+        '1.20.4'       : ':targets:fabric:1_20_4',
+        'fabric_1_20_4': ':targets:fabric:1_20_4',
+        '1.21.1'       : ':targets:fabric:1_21_1',
+        'fabric_1_21_1': ':targets:fabric:1_21_1'
 ]
 
 def requestedTarget = providers.gradleProperty('target').orElse('all').get()
 def selectedProjects = requestedTarget == 'all'
-	? targetProjects.values().toList()
-	: [targetProjects[requestedTarget]]
+        ? targetProjects.values().toList()
+        : [targetProjects[requestedTarget]]
 
 if (selectedProjects.any { it == null }) {
-	throw new GradleException(
-		"Unknown target '${requestedTarget}'. Use one of: ${targetProjects.keySet().join(', ')}, all"
-	)
+    throw new GradleException(
+            "Unknown target '${requestedTarget}'. Use one of: ${targetProjects.keySet().join(', ')}, all"
+    )
 }
 
 tasks.register('buildToPath', Copy) {
-	dependsOn(selectedProjects.collect { "${it}:remapJar" })
-	selectedProjects.each { targetProject ->
-		from(project(targetProject).tasks.named('remapJar'))
-	}
+    dependsOn(selectedProjects.collect { "${it}:remapJar" })
+    selectedProjects.each { targetProject ->
+        from(project(targetProject).tasks.named('remapJar'))
+    }
 
-	into(
-		providers.gradleProperty('distDir')
-			.map { file(it) }
-			.orElse(file("${rootDir}/dist"))
-	)
+    into(
+            providers.gradleProperty('distDir')
+                    .map { file(it) }
+                    .orElse(file("${rootDir}/dist"))
+    )
+}
+repositories {
+    mavenCentral()
+}
+dependencies {
+    testImplementation 'org.jetbrains.kotlin:kotlin-test'
+}
+kotlin {
+    jvmToolchain(8)
 }
