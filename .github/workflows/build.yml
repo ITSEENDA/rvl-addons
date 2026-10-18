@@ -27,6 +27,9 @@ jobs:
           distribution: 'microsoft'
       - name: make gradle wrapper executable
         run: chmod +x ./gradlew ./tako-libs/gradlew
+      - name: install Tako Libs SVG dependencies
+        working-directory: tako-libs
+        run: python3 -m pip install -r tools/requirements-svg.txt
       - name: publish Tako Libs to Maven local
         working-directory: tako-libs
         run: ./gradlew publishToMavenLocal
